@@ -1,25 +1,7 @@
 # liclock
 the libre chess clock
 
-**NOTE**: 
-
-1. Lock b high, where it will remain for the rest of the data transfer.
-1. Send data to U1
-    * b is the locked low, effectively transforming a1 and a2 into inputs on a dual 1-line to 2-line decoder. One B-low code, LLL, is invalid: it activates (begins the CSA period) for both U1 and U2.  Valid codes:
-        * LLLL: Activate CS1, 
-    * a2 avoids pulling U2 low, or both clocks will recieve the signal. Instead, it must:
-        1. Target the next D2 value
-        2. Hold D2 until it has been latched
-        3. Wait for the next data transmission period, preparting to target the following D2 value
-
-    writer  locked low (shared across ) CS1 on U2 should never come low - cannot use
-        - LLL
-        - HLL
-2. Send data to U2
-    * CS1 on U1 should never come low - cannot use
-        - LLL
-        - LHL
-
+This document is a work in progress! It's basically a disorganized scratchpad right now.
 
 ## Current Consumption
 
