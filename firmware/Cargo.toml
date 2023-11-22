@@ -1,0 +1,30 @@
+[package]
+name = "liclock"
+version = "0.1.0"
+authors = ["Michael Darr <michael.e.darr@gmail.com>"]
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "liclock"
+test = false
+bench = false
+
+[dependencies]
+panic-halt = "0.2.0"
+
+[dependencies.avr-device]
+path = "../../avr-device"
+features = ["attiny44a", "rt"]
+
+[profile.dev]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
