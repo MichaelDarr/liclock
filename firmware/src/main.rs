@@ -118,6 +118,7 @@ fn main() -> ! {
 fn TIM0_COMPA() {
     interrupt::free(|cs| {
         unsafe {
+            let mut refresh_clocks = false;
             let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
             let chess_clock_ref = chess_clock.deref_mut();
             
@@ -159,6 +160,10 @@ fn TIM0_COMPA() {
                         r.bits() | 0b0000_0010
                     ));
                 }
+            }
+
+            if refresh_clocks {
+                chess_clock.render_full();
             }
         }
     });

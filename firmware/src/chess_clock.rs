@@ -19,19 +19,21 @@ pub struct ChessClock {
     increment_millis: [u32; 2],
     target: Option<Player>,
     timers: [Timer; 2],
+    requires_refresh: bool,
 }
 
 impl ChessClock {
     pub const fn new() -> Self {
         Self {
             increment_millis: [
-                2000,
-                2000,
+                5000,
+                5000,
             ],
+            requires_refresh: false,
             target: None,
             timers: [
-                Timer::new(685000, 200),
-                Timer::new(685000, 200),
+                Timer::new(900000, 200),
+                Timer::new(900000, 200),
             ],
         }
     }
@@ -174,7 +176,12 @@ impl ChessClock {
         match actor {
             Some(player) => {
                 if  self.timers[player.own_idx()].report(active) {
-                    self.register_action(actor);
+                    match self.register_action(actor) {
+                        Some(ChessClockBehavior::ToggleTurn) => {
+                            self.requires_refresh = true;
+                        },
+                        _ => {},
+                    }
                 }
             },
             None => {},
@@ -258,9 +265,12 @@ impl ChessClock {
 
     pub unsafe fn tick(&mut self) {
         for player in [Player::A, Player::B] {
-            if self.timers[player.own_idx()].tick() {
+            if self.timers[player.own_idx()].tick() && !self.requires_refresh {
                 self.render(player);
             }
+        }
+        if self.requires_refresh {
+            self.render_full();
         }
     }
 }

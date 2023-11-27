@@ -73,47 +73,47 @@ impl ToggleSwitch {
     }
 }
 
-// pub struct CycleSwitch {
-//     active_duration: u32,
-//     rising_switch: ToggleSwitch,
-//     falling_confirmations: u16,
-//     required_confirmation_reports: u16,
-// }
+pub struct CycleSwitch {
+    active_duration: u32,
+    rising_switch: ToggleSwitch,
+    falling_confirmations: u16,
+    required_confirmation_reports: u16,
+}
 
-// impl CycleSwitch {
-//     pub const fn new(required_confirmation_reports: u16) -> Self {
-//         CycleSwitch {
-//             active_duration: 0,
-//             rising_switch: ToggleSwitch::new(required_confirmation_reports),
-//             falling_confirmations: 0,
-//             required_confirmation_reports,
-//         }
-//     }
+impl CycleSwitch {
+    pub const fn new(required_confirmation_reports: u16) -> Self {
+        CycleSwitch {
+            active_duration: 0,
+            rising_switch: ToggleSwitch::new(required_confirmation_reports),
+            falling_confirmations: 0,
+            required_confirmation_reports,
+        }
+    }
 
-//     pub fn report(&mut self, active: bool) -> bool {
-//         if self.active_duration == 0 {
-//             if self.rising_switch.report(active) {
-//                 self.active_duration = 1;
-//             }
-//             return false;
-//         }
+    pub fn report(&mut self, active: bool) -> bool {
+        if self.active_duration == 0 {
+            if self.rising_switch.report(active) {
+                self.active_duration = 1;
+            }
+            return false;
+        }
 
-//         self.active_duration += 1;
+        self.active_duration += 1;
 
-//         if active {
-//             self.falling_confirmations = 0;
-//             return false;
-//         }
+        if active {
+            self.falling_confirmations = 0;
+            return false;
+        }
         
-//         if self.falling_confirmations == self.required_confirmation_reports {
-//             self.active_duration = 0;
-//             self.falling_confirmations = 0;
-//             self.rising_switch = ToggleSwitch::new(self.required_confirmation_reports);
-//             return true;
-//         }
+        if self.falling_confirmations == self.required_confirmation_reports {
+            self.active_duration = 0;
+            self.falling_confirmations = 0;
+            self.rising_switch = ToggleSwitch::new(self.required_confirmation_reports);
+            return true;
+        }
 
 
-//         self.falling_confirmations += 1;
-//         return false;
-//     }
-// }
+        self.falling_confirmations += 1;
+        return false;
+    }
+}
