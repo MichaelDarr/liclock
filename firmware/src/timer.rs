@@ -1,3 +1,4 @@
+const REQUIRED_CONFIRMATION_REPORTS: u8 = 49;
 
 #[derive(Copy, Clone)]
 pub struct Timer {
@@ -5,6 +6,9 @@ pub struct Timer {
     is_running: bool,
     remaining_millis: u32,
     tick_interval_millis: u32,
+
+    awaiting_inactivity: bool,
+    change_confirmations: u8,
 }
 
 // Each timer manages the time of (one player's) chess clock. `tick` must be called
@@ -19,14 +23,15 @@ impl Timer {
             remaining_millis: duration_millis,
             is_running: false,
             tick_interval_millis,
+
+            awaiting_inactivity: true,
+            change_confirmations: 0,
         }
     }
 
     // Add `duration` to the remaining clock time.
-    // The return value indicates the remaining time.
-    pub fn increment(&mut self, duration_millis: u32) -> u32 {
+    pub fn increment(&mut self, duration_millis: u32) {
         self.remaining_millis = self.remaining_millis + duration_millis;
-        self.remaining_millis
     }
 
     pub fn is_expired(&self) -> bool {
@@ -35,10 +40,8 @@ impl Timer {
 
     // Pause the timer.
     // This has no effect if the timer is not running (paused or elapsed).
-    // The return value indicates the remaining time.
-    pub fn halt(&mut self) -> u32 {
+    pub fn halt(&mut self) {
         self.is_running = false;
-        self.remaining_millis
     }
 
     // Return the remaining time.
@@ -46,31 +49,56 @@ impl Timer {
         self.remaining_millis
     }
 
+    // Returns true if the report activated the toggle
+    pub fn report(&mut self, active: bool) -> bool {
+        // no progress toward state change
+        if self.awaiting_inactivity == active {
+            if self.change_confirmations != 0 {
+                self.change_confirmations = 0;
+            }
+            return false;
+        }
+
+        // state change triggered
+        if self.change_confirmations == REQUIRED_CONFIRMATION_REPORTS {
+            self.change_confirmations = 0;
+            self.awaiting_inactivity = !self.awaiting_inactivity;
+            return active;
+        }
+
+        // progressing toward state change
+        self.change_confirmations += 1;
+        return false;
+    }
+
     // Stop the clock and reset the remaining time to the initial duration.
-    // The return value indicates the remaining time.
-    pub fn reset(&mut self) -> u32 {
+    pub fn reset(&mut self) {
         self.halt();
         self.remaining_millis = self.duration_millis;
-        self.remaining_millis
     }
 
     // Begin running down the clock.
     // This has no effect if the clock is already running or is elapsed.
-    // The return value indicates the remaining time.
-    pub fn run(&mut self) -> u32 {
+    pub fn run(&mut self) {
         if !self.is_expired() {
             self.is_running = true;
         }
-        self.remaining_millis
     }
 
     // Tick the clock.
-    pub fn tick(&mut self) -> u32  {
+    // Returns true if this tick resulted in a digit change. 
+    pub fn tick(&mut self) -> bool  {
+        if !self.is_running {
+            return false;
+        }
+
         if self.is_expired() {
             self.is_running = false;
-        } else if self.is_running {
-            self.remaining_millis = self.remaining_millis - self.tick_interval_millis;
+            return true;
         }
-        self.remaining_millis
+
+        let will_change = (self.remaining_millis % 1000) < self.tick_interval_millis;
+        self.remaining_millis = self.remaining_millis - self.tick_interval_millis;
+        return will_change;
     }
 }

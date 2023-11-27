@@ -4,7 +4,7 @@ pub const CLOCK_CHARACTER_COUNT: usize = 4;
 // See table 1: output codes in the ICM7211 datasheet
 pub type Character = u8;
 
-pub mod char {
+pub mod code_b {
     use crate::descriptor::Character;
 
     pub const ZERO: Character = 0b0000_0000;
@@ -27,19 +27,19 @@ pub mod char {
 
 // transform a single-digit number (0-9, inclusive) to a character
 // if the provided number is greater than 9 (two digits), an empty character is returned
-pub fn num_to_char(src: u8) -> Character {
+pub fn num_to_code_b(src: u8) -> Character {
     match src {
-        0 => char::ZERO,
-        1 => char::ONE,
-        2 => char::TWO,
-        3 => char::THREE,
-        4 => char::FOUR,
-        5 => char::FIVE,
-        6 => char::SIX,
-        7 => char::SEVEN,
-        8 => char::EIGHT,
-        9 => char::NINE,
-        _ => char::BLANK,
+        0 => code_b::ZERO,
+        1 => code_b::ONE,
+        2 => code_b::TWO,
+        3 => code_b::THREE,
+        4 => code_b::FOUR,
+        5 => code_b::FIVE,
+        6 => code_b::SIX,
+        7 => code_b::SEVEN,
+        8 => code_b::EIGHT,
+        9 => code_b::NINE,
+        _ => code_b::H,
     }
 }
 
