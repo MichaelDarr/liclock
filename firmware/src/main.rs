@@ -9,13 +9,12 @@
 
 mod chess_clock;
 mod descriptor;
-mod switch;
 mod timer;
 
-// use panic_halt as _;
+use panic_halt as _;
 
 use avr_device::{
-    attiny44a,
+    attiny84a,
     interrupt,
     interrupt::Mutex,
 };
@@ -23,18 +22,17 @@ use chess_clock::ChessClock;
 use core::{
     cell::RefCell,
     ops::DerefMut,
-    panic::PanicInfo,
 };
 use descriptor::Player;
 
 pub static mut CHESS_CLOCK: Mutex<RefCell<ChessClock>> = Mutex::new(RefCell::new(ChessClock::new()));
-pub static mut PORTA: Mutex<RefCell<Option<attiny44a::PORTA>>> = Mutex::new(RefCell::new(None));
-pub static mut PORTB: Mutex<RefCell<Option<attiny44a::PORTB>>> = Mutex::new(RefCell::new(None));
-pub static mut TC0: Mutex<RefCell<Option<attiny44a::TC0>>> = Mutex::new(RefCell::new(None));
+pub static mut PORTA: Mutex<RefCell<Option<attiny84a::PORTA>>> = Mutex::new(RefCell::new(None));
+pub static mut PORTB: Mutex<RefCell<Option<attiny84a::PORTB>>> = Mutex::new(RefCell::new(None));
+pub static mut TC0: Mutex<RefCell<Option<attiny84a::TC0>>> = Mutex::new(RefCell::new(None));
 
 #[avr_device::entry]
 fn main() -> ! {
-    let dp = attiny44a::Peripherals::take().unwrap();
+    let dp = attiny84a::Peripherals::take().unwrap();
 
     unsafe {
         // TC0: Normal mode, no prescaler
@@ -114,11 +112,10 @@ fn main() -> ! {
     loop{}
 }
 
-#[interrupt(attiny44a)]
+#[interrupt(attiny84a)]
 fn TIM0_COMPA() {
     interrupt::free(|cs| {
         unsafe {
-            let mut refresh_clocks = false;
             let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
             let chess_clock_ref = chess_clock.deref_mut();
             
@@ -129,12 +126,20 @@ fn TIM0_COMPA() {
                         r.bits() | 0b0000_0111
                     ));
 
+                    let mut start_time = tc0.tcnt0.read().bits();
+                    'wait_sw1: loop {
+                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 4 {
+                            chess_clock_ref.record_keystate(None, porta.pina.read().pa3().bit_is_clear());
+                            break 'wait_sw1;
+                        }
+                    }
+
                     // a low: enable sw1
                     porta.porta.modify(|r, w| w.bits(
                         r.bits() & 0b1111_1101
                     ));
 
-                    let mut start_time = tc0.tcnt0.read().bits();
+                    start_time = tc0.tcnt0.read().bits();
                     'wait_sw1: loop {
                         if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 4 {
                             chess_clock_ref.record_keystate(Some(Player::A), porta.pina.read().pa3().bit_is_clear());
@@ -155,21 +160,42 @@ fn TIM0_COMPA() {
                         }
                     }
 
-                    // a high: disable all switches
-                    porta.porta.modify(|r, w| w.bits(
-                        r.bits() | 0b0000_0010
-                    ));
+                    match chess_clock_ref.get_target() {
+                        Some(Player::A) => {
+                            // Drive ~{led_1} low
+                            // * mux_2 enabled
+                            // * a low
+                            // * b low
+                            porta.porta.write(|w| w.bits(
+                                0b1111_1001
+                            ));
+                        },
+                        Some(Player::B) => {
+                            // Drive ~{led_2} low
+                            // * mux_2 enabled
+                            // * a high
+                            // * b low
+                            porta.porta.write(|w| w.bits(
+                                0b1111_1011
+                            ));
+                        },
+                        None => {
+                            // All mux outputs high:
+                            // * mux_1 enabled
+                            // * a high
+                            // * b high
+                            porta.porta.write(|w| w.bits(
+                                0b1111_1110
+                            ));
+                        },
+                    }
                 }
-            }
-
-            if refresh_clocks {
-                chess_clock.render_full();
             }
         }
     });
 }
 
-#[interrupt(attiny44a)]
+#[interrupt(attiny84a)]
 fn TIM1_OVF() {
     interrupt::free(|cs| {
         unsafe {
@@ -178,19 +204,4 @@ fn TIM1_OVF() {
             chess_clock_ref.tick();
         }
     });
-}
-
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {
-        interrupt::free(|cs| {
-            unsafe {
-                if let Some(ref mut porta) = PORTA.borrow(cs).borrow_mut().deref_mut() {
-                    porta.pina.write(|w| w.bits(
-                        0b0000_0001
-                    ));
-                }
-            }
-        });
-    }
 }

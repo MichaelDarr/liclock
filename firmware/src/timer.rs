@@ -1,4 +1,5 @@
-const REQUIRED_CONFIRMATION_REPORTS: u8 = 49;
+pub const REQUIRED_CONFIRMATION_REPORTS: u8 = 49;
+pub const LONGPRESS_CONFIRMATION_REPORTS: u8 = 255;
 
 #[derive(Copy, Clone)]
 pub struct Timer {

@@ -2,7 +2,7 @@
 
 ## Fuse Bytes
 
-[ATtiny44A, Page 165](https://ww1.microchip.com/downloads/en/DeviceDoc/ATtiny24A-44A-84A-DataSheet-DS40002269A.pdf)
+[ATtiny84A, Page 165](https://ww1.microchip.com/downloads/en/DeviceDoc/ATtiny24A-84A-84A-DataSheet-DS40002269A.pdf)
 
 ### Low Byte
 
@@ -15,7 +15,7 @@
 
 ```sh
 avrdude \
-  -p t44a \
+  -p t84a \
   -P /dev/ttyACM0 \
   -c avrisp \
   -b 19200 \

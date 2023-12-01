@@ -11,8 +11,8 @@ build:
 flash: SHELL:=/bin/bash
 flash:
 	avrdude \
-    -p t44a \
+    -p t84a \
     -P /dev/ttyACM0 \
     -c avrisp \
     -b 19200 \
-    -U{eeprom,flash,{l,h}fuse,lock}:w:"$(CURDIR)/target/avr-attiny44a/debug/liclock.elf":e
+    -U{eeprom,flash,{l,h}fuse,lock}:w:"$(CURDIR)/target/avr-attiny84a/debug/liclock.elf":e

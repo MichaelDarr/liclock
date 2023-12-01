@@ -39,7 +39,7 @@ pub fn num_to_code_b(src: u8) -> Character {
         7 => code_b::SEVEN,
         8 => code_b::EIGHT,
         9 => code_b::NINE,
-        _ => code_b::H,
+        _ => code_b::ZERO,
     }
 }
 

@@ -1,5 +1,9 @@
 use avr_device::interrupt;
-use crate::timer::Timer;
+use crate::timer::{
+    LONGPRESS_CONFIRMATION_REPORTS,
+    REQUIRED_CONFIRMATION_REPORTS,
+    Timer,
+};
 use crate::{
     PORTA,
     PORTB,
@@ -16,6 +20,7 @@ use crate::descriptor::{
 use core::ops::DerefMut;
 
 pub struct ChessClock {
+    ctrl_pressed_confirmations: Option<u8>,
     increment_millis: [u32; 2],
     target: Option<Player>,
     timers: [Timer; 2],
@@ -25,6 +30,7 @@ pub struct ChessClock {
 impl ChessClock {
     pub const fn new() -> Self {
         Self {
+            ctrl_pressed_confirmations: None,
             increment_millis: [
                 5000,
                 5000,
@@ -36,6 +42,10 @@ impl ChessClock {
                 Timer::new(900000, 200),
             ],
         }
+    }
+
+    pub fn get_target(&self) -> Option<Player> {
+        return self.target;
     }
 
     pub unsafe fn render(&self, player: Player) {
@@ -175,8 +185,8 @@ impl ChessClock {
     pub fn record_keystate(&mut self, actor: Option<Player>, active: bool) {
         match actor {
             Some(player) => {
-                if  self.timers[player.own_idx()].report(active) {
-                    match self.register_action(actor) {
+                if self.timers[player.own_idx()].report(active) {
+                    match self.register_action(actor, false) {
                         Some(ChessClockBehavior::ToggleTurn) => {
                             self.requires_refresh = true;
                         },
@@ -184,7 +194,31 @@ impl ChessClock {
                     }
                 }
             },
-            None => {},
+            None => {
+                match self.ctrl_pressed_confirmations {
+                    Some(confirmations) => {
+                        if active {
+                            if confirmations < 255 {
+                                self.ctrl_pressed_confirmations = Some(confirmations + 1);
+                            }
+                        } else {
+                            if confirmations >= LONGPRESS_CONFIRMATION_REPORTS {
+                                self.register_action(None, true);
+                            } else if confirmations > REQUIRED_CONFIRMATION_REPORTS {
+                                self.register_action(None, false);
+                            }
+                            self.ctrl_pressed_confirmations = None;
+                        }
+                    },
+                    None => {
+                        if active {
+                            self.ctrl_pressed_confirmations = Some(1);
+                        } else {
+                            self.ctrl_pressed_confirmations = None;
+                        }
+                    },
+                }
+            },
         }
     }
 
@@ -214,7 +248,9 @@ impl ChessClock {
         digits
     }
 
-    pub fn register_action(&mut self, actor: Option<Player>) -> Option<ChessClockBehavior> {
+    // register_action registers an external action taken upon the clock.
+    // A true `apply_mod` value indicates the presence of an action modifier, like a long press instead of a short one.
+    pub fn register_action(&mut self, actor: Option<Player>, apply_mod: bool) -> Option<ChessClockBehavior> {
         match actor {
             // player action
             Some(player) => {
