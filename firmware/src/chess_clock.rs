@@ -12,9 +12,9 @@ use crate::{
 use crate::descriptor::{
     Character,
     ChessClockBehavior,
-    CLOCK_CHARACTER_COUNT,
-    code_b,
-    num_to_code_b,
+    DIGIT_POSITIONS,
+    DigitPosition,
+    DigitQuartet,
     Player,
 };
 use core::ops::DerefMut;
@@ -68,36 +68,35 @@ impl ChessClock {
                                 porta.porta.write(|w| w.bits(0b0000_0011));
                             },
                         }
-                        for digit_idx in 0..4 {
+                        for digit_position in DIGIT_POSITIONS {
                             let tics_start = tc0.tcnt0.read().bits();
-                            let digit = digits[3-digit_idx];
-            
-                            match digit_idx {
-                                0 => {
+                            let digit = digits.get(digit_position);
+
+                            match digit_position {
+                                DigitPosition::Second => {
                                     // PA4 low, PA5 low
                                     porta.porta.modify(|r, w| w.bits(
                                         r.bits() & 0b1100_1111
                                     ));
                                 },
-                                1 => {
+                                DigitPosition::Decasecond => {
                                     // PA4 high, PA5 low
                                     porta.porta.modify(|r, w| w.bits(
                                         (r.bits() & 0b1101_1111) | 0b0001_0000
                                     ));
                                 },
-                                2 => {
+                                DigitPosition::Minute => {
                                     // PA4 low, PA5 high
                                     porta.porta.modify(|r, w| w.bits(
                                         (r.bits() & 0b1110_1111) | 0b0010_0000
                                     ));
                                 },
-                                3 => {
+                                DigitPosition::Decaminute => {
                                     // PA4 high, PA5 high
                                     porta.porta.modify(|r, w| w.bits(
                                         r.bits() | 0b0011_0000
                                     ));
                                 },
-                                _ => {},
                             }
             
                             if digit & 0b0000_0001 == 1 {
@@ -159,8 +158,8 @@ impl ChessClock {
                                 r.bits() | 0b0000_0001
                             ));
             
-                            // Allocate >= 2uS between each digit place
-                            if digit_idx != 3 {
+                            // Allocate >= 2uS between each digit place (don't wait after the final digit)
+                            if digit_position != DigitPosition::Second {
                                 'wait_ics: loop {
                                     if tc0.tcnt0.read().bits().wrapping_sub(tics_start) >= 38 {
                                         break 'wait_ics;
@@ -228,21 +227,21 @@ impl ChessClock {
         }
     }
 
-    pub fn get_digits(&self, player: Player) -> [Character; CLOCK_CHARACTER_COUNT] {
-        let mut digits: [Character; 4] = [code_b::BLANK; CLOCK_CHARACTER_COUNT];
+    pub fn get_digits(&self, player: Player) -> DigitQuartet {
+        let mut digits = DigitQuartet::new();
 
         let mut clock_ms = self.timers[player.own_idx()].remaining();
         let mut digit_value: u32 = 600000;
 
-        for digit_idx in 0..CLOCK_CHARACTER_COUNT {
-            let mut clock_digit: u8 = 0;
+        for digit_position in DIGIT_POSITIONS {
+            let mut clock_digit: Character = 0b0000_0000;
             while clock_ms >= digit_value {
                 clock_digit += 1;
                 clock_ms = clock_ms - digit_value;
             }
-            digit_value = if digit_idx == 1 {digit_value / 6} else {digit_value / 10};
-            if clock_digit != 0 || digit_idx != 0 {
-                digits[digit_idx] = num_to_code_b(clock_digit);
+            digit_value = if digit_position == DigitPosition::Minute {digit_value / 6} else {digit_value / 10};
+            if clock_digit != 0 || digit_position != DigitPosition::Decaminute {
+                digits.set(digit_position, clock_digit);
             }
         }
         digits
@@ -278,6 +277,20 @@ impl ChessClock {
                 match &self.target {
                     // pause
                     Some(_) => {
+                        // buzz on long press (testing)
+                        if apply_mod {
+                            interrupt::free(|cs| {
+                                unsafe {
+                                    if let Some(ref mut tc0) = TC0.borrow(cs).borrow_mut().deref_mut() {
+                                        tc0.timsk0.modify(|r, w| w.bits(
+                                            r.bits() | 0b0000_0100
+                                        ));
+                                    }
+                                }
+                            });
+                        }
+
+                        // Stop the clocks
                         for i in 0..2 {
                             self.timers[i].halt();
                         }

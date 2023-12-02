@@ -1,5 +1,3 @@
-pub const CLOCK_CHARACTER_COUNT: usize = 4;
-
 // the final 4 bits are the character's hexadecimalBCD representation (0bxxxx_3210)
 // See table 1: output codes in the ICM7211 datasheet
 pub type Character = u8;
@@ -25,21 +23,47 @@ pub mod code_b {
     pub const BLANK: Character = 0b0000_1111;
 }
 
-// transform a single-digit number (0-9, inclusive) to a character
-// if the provided number is greater than 9 (two digits), an empty character is returned
-pub fn num_to_code_b(src: u8) -> Character {
-    match src {
-        0 => code_b::ZERO,
-        1 => code_b::ONE,
-        2 => code_b::TWO,
-        3 => code_b::THREE,
-        4 => code_b::FOUR,
-        5 => code_b::FIVE,
-        6 => code_b::SIX,
-        7 => code_b::SEVEN,
-        8 => code_b::EIGHT,
-        9 => code_b::NINE,
-        _ => code_b::ZERO,
+#[derive(Clone, Copy, PartialEq)]
+pub enum DigitPosition {
+    Decaminute,
+    Minute,
+    Decasecond,
+    Second,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct DigitQuartet(u16);
+
+pub const DIGIT_POSITIONS: [DigitPosition; 4] = [
+    DigitPosition::Decaminute,
+    DigitPosition::Minute,
+    DigitPosition::Decasecond,
+    DigitPosition::Second,
+];
+
+fn digit_quartet_position_index(digit_position: DigitPosition) -> u8 {
+    match digit_position {
+        DigitPosition::Decaminute => 12,
+        DigitPosition::Minute => 8,
+        DigitPosition::Decasecond => 4,
+        DigitPosition::Second => 0,
+    }
+}
+
+impl DigitQuartet {
+    // Create 4 new blank digits
+    pub fn new() -> DigitQuartet {
+        DigitQuartet(0b0000_0000_0000_0000)
+    }
+
+    pub fn get(self, digit_position: DigitPosition) -> u8 {
+        (self.0 >> digit_quartet_position_index(digit_position)) as u8 & 0b0000_1111
+    }
+
+    pub fn set(&mut self, digit_position: DigitPosition, character: Character) {
+        let digit_idx = digit_quartet_position_index(digit_position);
+        //          generate a mask to clear the old 4 bits     ⟶  set new 4 bits in their place 
+        self.0 = (self.0 & !(0b0000_0000_0000_1111 << digit_idx)) | ((character as u16) << digit_idx);
     }
 }
 

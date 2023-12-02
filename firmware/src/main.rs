@@ -42,6 +42,8 @@ fn main() -> ! {
         dp.TC0.tccr0b.write(|w| w.bits(0b0000_0001));
         // Place the `A` output compare register at TOP
         dp.TC0.ocr0a.write(|w| w.bits(255));
+        // Place the `B` output compare register in the middle (buzzer)
+        dp.TC0.ocr0b.write(|w| w.bits(100));
         // enable `TIM0_COMPA` interrupt
         dp.TC0.timsk0.write(|w| w.bits(0b0000_0010));
 
@@ -110,6 +112,59 @@ fn main() -> ! {
     }
 
     loop{}
+}
+
+#[interrupt(attiny84a)]
+fn TIM0_COMPB() {
+    static mut CUR_CYCLE_IDLE_COUNT: u8 = 0;
+    static mut CUR_BEEP_CYCLE_COUNT: u8 = 0;
+
+    if *CUR_CYCLE_IDLE_COUNT < 70 {
+        *CUR_CYCLE_IDLE_COUNT += 1;
+        return;
+    }
+
+    *CUR_CYCLE_IDLE_COUNT = 0;
+    *CUR_BEEP_CYCLE_COUNT += 1;
+
+    interrupt::free(|cs| {
+        unsafe {
+            // Disable the beep after cycling 200 times
+            // Since this is all within a critical section, I'm unsure whether this eager
+            // disable (disabling before pulsing) matters. Timers continue running during
+            // critical sections, so I assume timer interrupt flags (OCF0B, in this case)
+            // may be set while this is running. However, I'm unsure what happens if the
+            // relevant mask register bit (OCIE0B) is disabled after its interrupt flag
+            // was set but before the end of the critical section during which its interrupt
+            // flag was set.
+            if *CUR_BEEP_CYCLE_COUNT > 200 {
+                *CUR_BEEP_CYCLE_COUNT = 0;
+                if let Some(ref mut tc0) = TC0.borrow(cs).borrow_mut().deref_mut() {
+                    tc0.timsk0.modify(|r, w| w.bits(
+                        r.bits() & 0b1111_1011
+                    ))
+                }
+            }
+
+            if let Some(ref mut tc0) = TC0.borrow(cs).borrow_mut().deref_mut() {
+                if let Some(ref mut porta) = PORTA.borrow(cs).borrow_mut().deref_mut() {
+                    let old_porta_bits = porta.porta.read().bits();
+
+                    let start_time = tc0.tcnt0.read().bits();
+                    porta.porta.modify(|r, w| w.bits(
+                        (r.bits() | 0b0000_0110) & 0b1111_1110
+                    ));
+                    'wait_sw1: loop {
+                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 200 {
+                            porta.porta.write(|w| w.bits(old_porta_bits));
+                            break 'wait_sw1;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
 }
 
 #[interrupt(attiny84a)]
