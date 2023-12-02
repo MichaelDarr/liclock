@@ -29,6 +29,7 @@ pub static mut CHESS_CLOCK: Mutex<RefCell<ChessClock>> = Mutex::new(RefCell::new
 pub static mut PORTA: Mutex<RefCell<Option<attiny84a::PORTA>>> = Mutex::new(RefCell::new(None));
 pub static mut PORTB: Mutex<RefCell<Option<attiny84a::PORTB>>> = Mutex::new(RefCell::new(None));
 pub static mut TC0: Mutex<RefCell<Option<attiny84a::TC0>>> = Mutex::new(RefCell::new(None));
+pub static mut TC1: Mutex<RefCell<Option<attiny84a::TC1>>> = Mutex::new(RefCell::new(None));
 
 #[avr_device::entry]
 fn main() -> ! {
@@ -39,7 +40,7 @@ fn main() -> ! {
         // * TOP = 0xFF
         // * Update of OCRx at Immediate
         // * TOV flag set on MAX
-        dp.TC0.tccr0b.write(|w| w.bits(0b0000_0001));
+        dp.TC0.tccr0b.write(|w| w.bits(0b0000_0010));
         // Place the `A` output compare register at TOP
         dp.TC0.ocr0a.write(|w| w.bits(255));
         // Place the `B` output compare register in the middle (buzzer)
@@ -68,11 +69,11 @@ fn main() -> ! {
         // | :----------------------------- | :--------------- | :------------ |
         // | System Frequency Clock         | Fclk_I/0         | 20MHz         |
         // | Clock Cycle Duration           | CK               | 50nS      1CK |
-        // | Timer/Clock 0 Cycle Duration   | TC0              | 50nS      0CK |
+        // | Timer/Clock 0 Cycle Duration   | TC0              | 400nS     8CK |
         // | Timer/Clock 1 Cycle Duration   | TC1 (clkI/O/256) | 12800nS 256CK |
         //
-        // ## TC1 -> Seconds:
-        // 78125CK1 == 1S == 0->15625 x 5
+        // ## TC1 ➡ Seconds:
+        // 78125CK1 == 1S == (0 ➡ 15625) × 5
         // Count using fifth-of-second interval (200ms per interval)
         //
         // | Variable                       | Symbol   | Value          | Spec             | Description
@@ -93,7 +94,7 @@ fn main() -> ! {
         // Set WGM12 & WGM13, prescale 256x
         dp.TC1.tccr1b.write(|w| w.bits(0b0001_1100));
         // tick the chess clock every 200ms
-        // (0 -> ocr1a) = 4000000CK = 200000000nS = 200 mS
+        // (0 ➡ ocr1a) = 4000000CK = 200000000nS = 200 mS
         dp.TC1.ocr1a.write(|w| w.bits(15624));
         // enable `TIM1_OVF` interrupt
         dp.TC1.timsk1.write(|w| w.bits(0b0000_0001));
@@ -104,6 +105,7 @@ fn main() -> ! {
             PORTA.borrow(cs).replace(Some(dp.PORTA));
             PORTB.borrow(cs).replace(Some(dp.PORTB));
             TC0.borrow(cs).replace(Some(dp.TC0));
+            TC1.borrow(cs).replace(Some(dp.TC1));
             let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
             let chess_clock_ref = chess_clock.deref_mut();
             chess_clock_ref.render_full();
@@ -115,60 +117,9 @@ fn main() -> ! {
 }
 
 #[interrupt(attiny84a)]
-fn TIM0_COMPB() {
-    static mut CUR_CYCLE_IDLE_COUNT: u8 = 0;
-    static mut CUR_BEEP_CYCLE_COUNT: u8 = 0;
-
-    if *CUR_CYCLE_IDLE_COUNT < 70 {
-        *CUR_CYCLE_IDLE_COUNT += 1;
-        return;
-    }
-
-    *CUR_CYCLE_IDLE_COUNT = 0;
-    *CUR_BEEP_CYCLE_COUNT += 1;
-
-    interrupt::free(|cs| {
-        unsafe {
-            // Disable the beep after cycling 200 times
-            // Since this is all within a critical section, I'm unsure whether this eager
-            // disable (disabling before pulsing) matters. Timers continue running during
-            // critical sections, so I assume timer interrupt flags (OCF0B, in this case)
-            // may be set while this is running. However, I'm unsure what happens if the
-            // relevant mask register bit (OCIE0B) is disabled after its interrupt flag
-            // was set but before the end of the critical section during which its interrupt
-            // flag was set.
-            if *CUR_BEEP_CYCLE_COUNT > 200 {
-                *CUR_BEEP_CYCLE_COUNT = 0;
-                if let Some(ref mut tc0) = TC0.borrow(cs).borrow_mut().deref_mut() {
-                    tc0.timsk0.modify(|r, w| w.bits(
-                        r.bits() & 0b1111_1011
-                    ))
-                }
-            }
-
-            if let Some(ref mut tc0) = TC0.borrow(cs).borrow_mut().deref_mut() {
-                if let Some(ref mut porta) = PORTA.borrow(cs).borrow_mut().deref_mut() {
-                    let old_porta_bits = porta.porta.read().bits();
-
-                    let start_time = tc0.tcnt0.read().bits();
-                    porta.porta.modify(|r, w| w.bits(
-                        (r.bits() | 0b0000_0110) & 0b1111_1110
-                    ));
-                    'wait_sw1: loop {
-                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 200 {
-                            porta.porta.write(|w| w.bits(old_porta_bits));
-                            break 'wait_sw1;
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-}
-
-#[interrupt(attiny84a)]
 fn TIM0_COMPA() {
+    static mut SIMUL_LED_TOGGLE: bool = true;
+
     interrupt::free(|cs| {
         unsafe {
             let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
@@ -182,10 +133,10 @@ fn TIM0_COMPA() {
                     ));
 
                     let mut start_time = tc0.tcnt0.read().bits();
-                    'wait_sw1: loop {
-                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 4 {
+                    'wait_sw3: loop {
+                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 2 {
                             chess_clock_ref.record_keystate(None, porta.pina.read().pa3().bit_is_clear());
-                            break 'wait_sw1;
+                            break 'wait_sw3;
                         }
                     }
 
@@ -196,7 +147,7 @@ fn TIM0_COMPA() {
 
                     start_time = tc0.tcnt0.read().bits();
                     'wait_sw1: loop {
-                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 4 {
+                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 2 {
                             chess_clock_ref.record_keystate(Some(Player::A), porta.pina.read().pa3().bit_is_clear());
                             break 'wait_sw1;
                         }
@@ -209,7 +160,7 @@ fn TIM0_COMPA() {
 
                     start_time = tc0.tcnt0.read().bits();
                     'wait_sw2: loop {
-                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 4 {
+                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 2 {
                             chess_clock_ref.record_keystate(Some(Player::B), porta.pina.read().pa3().bit_is_clear());
                             break 'wait_sw2;
                         }
@@ -235,14 +186,41 @@ fn TIM0_COMPA() {
                             ));
                         },
                         None => {
-                            // All mux outputs high:
-                            // * mux_1 enabled
-                            // * a high
-                            // * b high
-                            porta.porta.write(|w| w.bits(
-                                0b1111_1110
-                            ));
+                            // Target both LEDs (alternate)
+                            // * mux_2 enabled
+                            // * a toggle
+                            // * b low
+                            if *SIMUL_LED_TOGGLE {
+                                porta.porta.write(|w| w.bits(
+                                    0b1111_1001
+                                ));
+                            } else {
+                                porta.porta.write(|w| w.bits(
+                                    0b1111_1011
+                                ));
+                            }
+                            *SIMUL_LED_TOGGLE = !*SIMUL_LED_TOGGLE
                         },
+                    }
+
+                    if chess_clock.consume_beep() {
+                        porta.porta.modify(|r, w| w.bits(
+                            (r.bits() | 0b0000_0110) & 0b1111_1110
+                        ));
+                        if let Some(ref mut tc1) = TC1.borrow(cs).borrow_mut().deref_mut() {
+                            for _ in 0..150 {
+                                let buzz_start_time = tc1.tcnt1.read().bits();
+                                'wait_buzz: loop {
+                                    if tc1.tcnt1.read().bits().wrapping_sub(buzz_start_time) >= 60 {
+                                        porta.pina.write(|w| w.bits(
+                                            0b0000_0001
+                                        ));
+                                        break 'wait_buzz;
+                                    }
+                                }
+                                
+                            }
+                        }
                     }
                 }
             }

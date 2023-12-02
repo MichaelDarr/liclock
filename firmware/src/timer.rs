@@ -1,5 +1,7 @@
-pub const REQUIRED_CONFIRMATION_REPORTS: u8 = 49;
-pub const LONGPRESS_CONFIRMATION_REPORTS: u8 = 255;
+// ~5ms
+pub const REQUIRED_CONFIRMATION_REPORTS: u16 = 12;
+// ~0.8s
+pub const LONGPRESS_CONFIRMATION_REPORTS: u16 = 8000;
 
 #[derive(Copy, Clone)]
 pub struct Timer {
@@ -9,7 +11,7 @@ pub struct Timer {
     tick_interval_millis: u32,
 
     awaiting_inactivity: bool,
-    change_confirmations: u8,
+    change_confirmations: u16,
 }
 
 // Each timer manages the time of (one player's) chess clock. `tick` must be called

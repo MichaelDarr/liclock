@@ -20,7 +20,8 @@ use crate::descriptor::{
 use core::ops::DerefMut;
 
 pub struct ChessClock {
-    ctrl_pressed_confirmations: Option<u8>,
+    beep: bool,
+    ctrl_pressed_confirmations: Option<u16>,
     increment_millis: [u32; 2],
     target: Option<Player>,
     timers: [Timer; 2],
@@ -30,6 +31,7 @@ pub struct ChessClock {
 impl ChessClock {
     pub const fn new() -> Self {
         Self {
+            beep: false,
             ctrl_pressed_confirmations: None,
             increment_millis: [
                 5000,
@@ -42,6 +44,14 @@ impl ChessClock {
                 Timer::new(900000, 200),
             ],
         }
+    }
+
+    pub fn consume_beep(&mut self) -> bool {
+        if self.beep {
+            self.beep = false;
+            return true;
+        }
+        return false;
     }
 
     pub fn get_target(&self) -> Option<Player> {
@@ -144,13 +154,13 @@ impl ChessClock {
                                 ));
                             }
             
-                            // pulse mux_1_enable for at least 200ns (5 clock cycles)
+                            // pulse mux_1_enable for at least 1 8x clock cycle
                             let tcsa_start = tc0.tcnt0.read().bits();
                             porta.porta.modify(|r, w| w.bits(
                                 r.bits() & 0b1111_1110
                             ));
                             'wait_ics: loop {
-                                if tc0.tcnt0.read().bits().wrapping_sub(tcsa_start) >= 3 {
+                                if tc0.tcnt0.read().bits().wrapping_sub(tcsa_start) >= 1 {
                                     break 'wait_ics;
                                 }
                             }
@@ -161,7 +171,7 @@ impl ChessClock {
                             // Allocate >= 2uS between each digit place (don't wait after the final digit)
                             if digit_position != DigitPosition::Second {
                                 'wait_ics: loop {
-                                    if tc0.tcnt0.read().bits().wrapping_sub(tics_start) >= 38 {
+                                    if tc0.tcnt0.read().bits().wrapping_sub(tics_start) >= 5 {
                                         break 'wait_ics;
                                     }
                                 }
@@ -196,16 +206,21 @@ impl ChessClock {
             None => {
                 match self.ctrl_pressed_confirmations {
                     Some(confirmations) => {
-                        if active {
-                            if confirmations < 255 {
+                        if confirmations == LONGPRESS_CONFIRMATION_REPORTS {
+                            self.register_action(None, true);
+                            self.ctrl_pressed_confirmations = Some(LONGPRESS_CONFIRMATION_REPORTS + 1);
+                        } else if confirmations < LONGPRESS_CONFIRMATION_REPORTS {
+                            if active {
                                 self.ctrl_pressed_confirmations = Some(confirmations + 1);
+                            } else {
+                                if confirmations >= LONGPRESS_CONFIRMATION_REPORTS {
+                                    self.register_action(None, true);
+                                } else if confirmations > REQUIRED_CONFIRMATION_REPORTS {
+                                    self.register_action(None, false);
+                                }
+                                self.ctrl_pressed_confirmations = None;
                             }
-                        } else {
-                            if confirmations >= LONGPRESS_CONFIRMATION_REPORTS {
-                                self.register_action(None, true);
-                            } else if confirmations > REQUIRED_CONFIRMATION_REPORTS {
-                                self.register_action(None, false);
-                            }
+                        } else if !active {
                             self.ctrl_pressed_confirmations = None;
                         }
                     },
@@ -255,8 +270,10 @@ impl ChessClock {
             Some(player) => {
                 match &self.target {
                     Some(target) => {
-                        // if it's the actors turn and time is still on their clock, switch turns
+                        // if it's the actors turn and time is still on their clock, beep and switch turns
                         if *target == player && !self.timers[player.own_idx()].is_expired() {
+                            // TODO => disable according to programming
+                            self.beep = true;
                             self.target = Some(player.opponent());
                             self.timers[player.own_idx()].halt();
                             self.timers[player.own_idx()].increment(self.increment_millis[player.own_idx()]);
@@ -266,6 +283,8 @@ impl ChessClock {
                     }
                     // resume
                     None => {
+                        // TODO => disable according to programming
+                        self.beep = true;
                         self.target = Some(player.opponent());
                         self.timers[player.opponent_idx()].run();
                         return Some(ChessClockBehavior::Resume);
@@ -277,17 +296,8 @@ impl ChessClock {
                 match &self.target {
                     // pause
                     Some(_) => {
-                        // buzz on long press (testing)
                         if apply_mod {
-                            interrupt::free(|cs| {
-                                unsafe {
-                                    if let Some(ref mut tc0) = TC0.borrow(cs).borrow_mut().deref_mut() {
-                                        tc0.timsk0.modify(|r, w| w.bits(
-                                            r.bits() | 0b0000_0100
-                                        ));
-                                    }
-                                }
-                            });
+                            // TODO => enter programming mode
                         }
 
                         // Stop the clocks
@@ -296,14 +306,14 @@ impl ChessClock {
                         }
                         self.target = None;
                         return Some(ChessClockBehavior::Pause);
-                    }
+                    },
                     // reset
                     None => {
                         for i in 0..2 {
                             self.timers[i].reset();
                         }
                         return Some(ChessClockBehavior::Reset);
-                    }
+                    },
                 }
             }
         }
