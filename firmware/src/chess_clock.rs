@@ -355,6 +355,9 @@ impl ChessClock {
                     }
                     None => {
                         if apply_mod {
+                            for player in [Player::A, Player::B] {
+                                self.timers[player.own_idx()].reset_to_remaining()
+                            }
                             self.requires_refresh = true;
                             self.mode = ClockMode::Play;
                         } else {
@@ -376,6 +379,9 @@ impl ChessClock {
                     }
                     None => {
                         if apply_mod {
+                            for player in [Player::A, Player::B] {
+                                self.timers[player.own_idx()].reset_to_remaining()
+                            }
                             self.requires_refresh = true;
                             self.mode = ClockMode::Play;
                         } else {
@@ -397,6 +403,9 @@ impl ChessClock {
                     }
                     None => {
                         if apply_mod {
+                            for player in [Player::A, Player::B] {
+                                self.timers[player.own_idx()].reset_to_remaining()
+                            }
                             self.requires_refresh = true;
                             self.mode = ClockMode::Play;
                         } else {
@@ -418,6 +427,9 @@ impl ChessClock {
                     }
                     None => {
                         if apply_mod {
+                            for player in [Player::A, Player::B] {
+                                self.timers[player.own_idx()].reset_to_remaining()
+                            }
                             self.requires_refresh = true;
                             self.mode = ClockMode::Play;
                         } else {

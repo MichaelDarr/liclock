@@ -85,6 +85,12 @@ impl Timer {
         self.remaining_millis = self.duration_millis;
     }
 
+    // Stop the clock and set the total duration to the remaining time. 
+    pub fn reset_to_remaining(&mut self) {
+        self.halt();
+        self.duration_millis = self.remaining_millis;
+    }
+
     // Begin running down the clock.
     // This has no effect if the clock is already running or is elapsed.
     pub fn run(&mut self) {
