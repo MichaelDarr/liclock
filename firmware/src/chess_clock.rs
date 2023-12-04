@@ -12,10 +12,11 @@ use crate::{
 use crate::descriptor::{
     Character,
     ChessClockBehavior,
+    ClockMode,
     DIGIT_POSITIONS,
     DigitPosition,
     DigitQuartet,
-    Player,
+    Player, code_b,
 };
 use core::ops::DerefMut;
 
@@ -23,8 +24,10 @@ pub struct ChessClock {
     beep: bool,
     ctrl_pressed_confirmations: Option<u16>,
     increment_millis: [u32; 2],
+    mode: ClockMode,
     target: Option<Player>,
     timers: [Timer; 2],
+    tock: bool,
     requires_refresh: bool,
 }
 
@@ -37,12 +40,14 @@ impl ChessClock {
                 5000,
                 5000,
             ],
+            mode: ClockMode::Play,
             requires_refresh: false,
             target: None,
             timers: [
                 Timer::new(900000, 200),
                 Timer::new(900000, 200),
             ],
+            tock: false,
         }
     }
 
@@ -259,76 +264,194 @@ impl ChessClock {
                 digits.set(digit_position, clock_digit);
             }
         }
+
+        if self.tock && self.mode != ClockMode::Play {
+            let blank_digit_idx = match self.mode {
+                ClockMode::SetDecaminute => DigitPosition::Decaminute,
+                ClockMode::SetMinute => DigitPosition::Minute,
+                ClockMode::SetDecasecond => DigitPosition::Decasecond,
+                ClockMode::SetSecond => DigitPosition::Second,
+                _ => DigitPosition::Second,
+            };
+            digits.set(blank_digit_idx, code_b::BLANK);
+        }
+
         digits
     }
 
     // register_action registers an external action taken upon the clock.
     // A true `apply_mod` value indicates the presence of an action modifier, like a long press instead of a short one.
     pub fn register_action(&mut self, actor: Option<Player>, apply_mod: bool) -> Option<ChessClockBehavior> {
-        match actor {
-            // player action
-            Some(player) => {
-                match &self.target {
-                    Some(target) => {
-                        // if it's the actors turn and time is still on their clock, beep and switch turns
-                        if *target == player && !self.timers[player.own_idx()].is_expired() {
-                            // TODO => disable according to programming
-                            self.beep = true;
-                            self.target = Some(player.opponent());
-                            self.timers[player.own_idx()].halt();
-                            self.timers[player.own_idx()].increment(self.increment_millis[player.own_idx()]);
-                            self.timers[player.opponent_idx()].run();
-                            return Some(ChessClockBehavior::ToggleTurn);
+        match self.mode {
+            ClockMode::Play => {
+                match actor {
+                    // player action
+                    Some(player) => {
+                        match &self.target {
+                            Some(target) => {
+                                // if it's the actors turn and time is still on their clock, beep and switch turns
+                                if *target == player && !self.timers[player.own_idx()].is_expired() {
+                                    // TODO => disable beep according to programming
+                                    self.beep = true;
+                                    self.target = Some(player.opponent());
+                                    self.timers[player.own_idx()].halt();
+                                    self.timers[player.own_idx()].increment(self.increment_millis[player.own_idx()]);
+                                    self.timers[player.opponent_idx()].run();
+                                    return Some(ChessClockBehavior::ToggleTurn);
+                                }
+                            }
+                            // resume
+                            None => {
+                                // TODO => disable beep according to programming
+                                self.beep = true;
+                                self.target = Some(player.opponent());
+                                self.timers[player.opponent_idx()].run();
+                                return Some(ChessClockBehavior::Resume);
+                            }
                         }
-                    }
-                    // resume
+                    },
+                    // control action
                     None => {
-                        // TODO => disable according to programming
-                        self.beep = true;
-                        self.target = Some(player.opponent());
-                        self.timers[player.opponent_idx()].run();
-                        return Some(ChessClockBehavior::Resume);
+                        if apply_mod {
+                            self.target = None;
+                            // Reset (and halt) timers before entering edit mode 
+                            for i in 0..2 {
+                                self.timers[i].reset();
+                            }
+                            self.mode = ClockMode::SetDecaminute;
+                            return Some(ChessClockBehavior::ChangeMode);
+                        } else {
+                            match &self.target {
+                                // pause
+                                Some(_) => {
+                                    // Stop the clocks
+                                    for i in 0..2 {
+                                        self.timers[i].halt();
+                                    }
+                                    self.target = None;
+                                    return Some(ChessClockBehavior::Pause);
+                                },
+                                // reset
+                                None => {
+                                    for i in 0..2 {
+                                        self.timers[i].reset();
+                                    }
+                                    return Some(ChessClockBehavior::Reset);
+                                },
+                            }
+                        }
+                    },
+                }
+            },
+            ClockMode::SetDecaminute => {
+                match actor {
+                    Some(player) => {
+                        if ((self.timers[player.own_idx()].remaining() % 6000000) + 600000) >= 6000000 {
+                            self.timers[player.own_idx()].decrement(5400000);
+                        } else {
+                            self.timers[player.own_idx()].increment(600000);
+                        }
+                        return Some(ChessClockBehavior::EditTime);
+                    }
+                    None => {
+                        if apply_mod {
+                            self.requires_refresh = true;
+                            self.mode = ClockMode::Play;
+                        } else {
+                            self.mode = ClockMode::SetMinute;
+                        }
+                        return Some(ChessClockBehavior::ChangeMode);
                     }
                 }
             },
-            // control action
-            None => {
-                match &self.target {
-                    // pause
-                    Some(_) => {
-                        if apply_mod {
-                            // TODO => enter programming mode
+            ClockMode::SetMinute => {
+                match actor {
+                    Some(player) => {
+                        if ((self.timers[player.own_idx()].remaining() % 600000) + 60000) >= 600000 {
+                            self.timers[player.own_idx()].decrement(540000);
+                        } else {
+                            self.timers[player.own_idx()].increment(60000);
                         }
-
-                        // Stop the clocks
-                        for i in 0..2 {
-                            self.timers[i].halt();
-                        }
-                        self.target = None;
-                        return Some(ChessClockBehavior::Pause);
-                    },
-                    // reset
+                        return Some(ChessClockBehavior::EditTime);
+                    }
                     None => {
-                        for i in 0..2 {
-                            self.timers[i].reset();
+                        if apply_mod {
+                            self.requires_refresh = true;
+                            self.mode = ClockMode::Play;
+                        } else {
+                            self.mode = ClockMode::SetDecasecond;
                         }
-                        return Some(ChessClockBehavior::Reset);
-                    },
+                        return Some(ChessClockBehavior::ChangeMode);
+                    }
                 }
-            }
+            },
+            ClockMode::SetDecasecond => {
+                match actor {
+                    Some(player) => {
+                        if ((self.timers[player.own_idx()].remaining() % 60000) + 10000) >= 60000 {
+                            self.timers[player.own_idx()].decrement(50000);
+                        } else {
+                            self.timers[player.own_idx()].increment(10000);
+                        }
+                        return Some(ChessClockBehavior::EditTime);
+                    }
+                    None => {
+                        if apply_mod {
+                            self.requires_refresh = true;
+                            self.mode = ClockMode::Play;
+                        } else {
+                            self.mode = ClockMode::SetSecond;
+                        }
+                        return Some(ChessClockBehavior::ChangeMode);
+                    }
+                }
+            },
+            ClockMode::SetSecond => {
+                match actor {
+                    Some(player) => {
+                        if ((self.timers[player.own_idx()].remaining() % 10000) + 1000) >= 10000 {
+                            self.timers[player.own_idx()].decrement(9000);
+                        } else {
+                            self.timers[player.own_idx()].increment(1000);
+                        }
+                        return Some(ChessClockBehavior::EditTime);
+                    }
+                    None => {
+                        if apply_mod {
+                            self.requires_refresh = true;
+                            self.mode = ClockMode::Play;
+                        } else {
+                            self.mode = ClockMode::SetDecaminute;
+                        }
+                        return Some(ChessClockBehavior::ChangeMode);
+                    }
+                }
+            },
         }
 
-        // nop
         return None;
     }
 
     pub unsafe fn tick(&mut self) {
+        static mut THROTTLE_TOCK: bool = false;
+
+        if THROTTLE_TOCK {
+            THROTTLE_TOCK = false;
+        } else {
+            THROTTLE_TOCK = true;
+            self.tock = !self.tock;
+        }
+
+        // TODO => get smarter about when to refresh outside of play mode
+        let full_refresh = self.requires_refresh || self.mode != ClockMode::Play;
+
         for player in [Player::A, Player::B] {
-            if self.timers[player.own_idx()].tick() && !self.requires_refresh {
+            if self.timers[player.own_idx()].tick() && !full_refresh {
                 self.render(player);
             }
         }
-        if self.requires_refresh {
+
+        if full_refresh {
             self.render_full();
         }
     }

@@ -32,7 +32,12 @@ impl Timer {
         }
     }
 
-    // Add `duration` to the remaining clock time.
+    // Remove `duration_millis` from the remaining clock time.
+    pub fn decrement(&mut self, duration_millis: u32) {
+        self.remaining_millis = self.remaining_millis - duration_millis;
+    }
+
+    // Add `duration_millis` to the remaining clock time.
     pub fn increment(&mut self, duration_millis: u32) {
         self.remaining_millis = self.remaining_millis + duration_millis;
     }

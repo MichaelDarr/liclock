@@ -24,6 +24,15 @@ pub mod code_b {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+pub enum ClockMode {
+    Play,
+    SetDecaminute,
+    SetMinute,
+    SetDecasecond,
+    SetSecond,
+}
+
+#[derive(Clone, Copy, PartialEq)]
 pub enum DigitPosition {
     Decaminute,
     Minute,
@@ -70,6 +79,8 @@ impl DigitQuartet {
 // the effect an external action (usually a button press) had on a chess clock
 #[derive(Clone, PartialEq)]
 pub enum ChessClockBehavior {
+    ChangeMode,
+    EditTime,
     Pause,
     Reset,
     Resume,

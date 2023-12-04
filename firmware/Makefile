@@ -12,7 +12,7 @@ flash: SHELL:=/bin/bash
 flash:
 	avrdude \
     -p t84a \
-    -P /dev/ttyACM0 \
+    -P /dev/ttyACM1 \
     -c avrisp \
     -b 19200 \
     -U{eeprom,flash,{l,h}fuse,lock}:w:"$(CURDIR)/target/avr-attiny84a/debug/liclock.elf":e
