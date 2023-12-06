@@ -8,6 +8,7 @@
 #![feature(cell_update)]
 
 mod chess_clock;
+mod config;
 mod descriptor;
 mod timer;
 
@@ -19,13 +20,15 @@ use avr_device::{
     interrupt::Mutex,
 };
 use chess_clock::ChessClock;
+use config::ChessClockConfig;
 use core::{
     cell::RefCell,
     ops::DerefMut,
 };
-use descriptor::Player;
+use descriptor::{Eeprom, Player};
 
-pub static mut CHESS_CLOCK: Mutex<RefCell<ChessClock>> = Mutex::new(RefCell::new(ChessClock::new()));
+pub static mut CHESS_CLOCK: Mutex<RefCell<ChessClock>> = Mutex::new(RefCell::new(ChessClock::new(None)));
+pub static mut EEPROM: Mutex<RefCell<Option<Eeprom>>> = Mutex::new(RefCell::new(None));
 pub static mut PORTA: Mutex<RefCell<Option<attiny84a::PORTA>>> = Mutex::new(RefCell::new(None));
 pub static mut PORTB: Mutex<RefCell<Option<attiny84a::PORTB>>> = Mutex::new(RefCell::new(None));
 pub static mut TC0: Mutex<RefCell<Option<attiny84a::TC0>>> = Mutex::new(RefCell::new(None));
@@ -102,10 +105,12 @@ fn main() -> ! {
 
     unsafe {
         interrupt::free(|cs| {
+            EEPROM.borrow(cs).replace(Some(Eeprom::new(dp.EEPROM)));
             PORTA.borrow(cs).replace(Some(dp.PORTA));
             PORTB.borrow(cs).replace(Some(dp.PORTB));
             TC0.borrow(cs).replace(Some(dp.TC0));
             TC1.borrow(cs).replace(Some(dp.TC1));
+            CHESS_CLOCK.borrow(cs).replace(ChessClock::new(Some(ChessClockConfig::new(Some(0)))));
             let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
             let chess_clock_ref = chess_clock.deref_mut();
             chess_clock_ref.render_full();
@@ -203,22 +208,51 @@ fn TIM0_COMPA() {
                         },
                     }
 
-                    if chess_clock.consume_beep() {
+                    if let Some(beep) = chess_clock.consume_beep() {
                         porta.porta.modify(|r, w| w.bits(
                             (r.bits() | 0b0000_0110) & 0b1111_1110
                         ));
                         if let Some(ref mut tc1) = TC1.borrow(cs).borrow_mut().deref_mut() {
-                            for _ in 0..150 {
-                                let buzz_start_time = tc1.tcnt1.read().bits();
-                                'wait_buzz: loop {
-                                    if tc1.tcnt1.read().bits().wrapping_sub(buzz_start_time) >= 60 {
-                                        porta.pina.write(|w| w.bits(
-                                            0b0000_0001
+                            let beep_cycle_duration = 210 - (beep.tone * 30);
+                            let beep_cycle_duration_16 = beep_cycle_duration as u16;
+                            let beep_cycle_midpoint = match beep.volume {
+                                // 0.5% duty cycle
+                                1 => {
+                                    beep_cycle_duration - beep_cycle_duration.div_ceil(200)
+                                }
+                                // 3% duty cycle
+                                2 => {
+                                    beep_cycle_duration - beep_cycle_duration.div_ceil(33)
+                                }
+                                // 50% duty cycle
+                                _ => {
+                                    beep_cycle_duration.div_ceil(2)
+                                },
+                            };
+
+                            let mut beep_duration_remaining: u16 = 15000;
+                            'wait_buzz_instance: loop {
+                                let cycle_start_time = tc1.tcnt1.read().bits();
+                                let mut buzz_cycle_high = false;
+                                'wait_buzz_cycle: loop {
+                                    if buzz_cycle_high {
+                                        if (tc1.tcnt1.read().bits().wrapping_sub(cycle_start_time) as u8) >= beep_cycle_duration {
+                                                porta.porta.modify(|r, w| w.bits(
+                                                    r.bits() & 0b1111_1110
+                                                ));
+                                            break 'wait_buzz_cycle;
+                                        }
+                                    } else if (tc1.tcnt1.read().bits().wrapping_sub(cycle_start_time) as u8) >= beep_cycle_midpoint {
+                                        buzz_cycle_high = true;
+                                        porta.porta.modify(|r, w| w.bits(
+                                            r.bits() | 0b0000_0001
                                         ));
-                                        break 'wait_buzz;
                                     }
                                 }
-                                
+                                if beep_duration_remaining < beep_cycle_duration_16 {
+                                    break 'wait_buzz_instance;
+                                }
+                                beep_duration_remaining -= beep_cycle_duration_16;
                             }
                         }
                     }

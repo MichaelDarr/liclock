@@ -1,62 +1,103 @@
 use avr_device::interrupt;
-use crate::timer::{
-    LONGPRESS_CONFIRMATION_REPORTS,
-    REQUIRED_CONFIRMATION_REPORTS,
-    Timer,
-};
+use core::ops::DerefMut;
 use crate::{
+    config::ChessClockConfig,
+    descriptor::{
+        Character,
+        ChessClockBehavior,
+        ClockMode,
+        DIGIT_POSITIONS,
+        DigitPosition,
+        DigitQuartet,
+        Player, code_b,
+    },
     PORTA,
     PORTB,
     TC0,
+    timer::{
+        LONGPRESS_CONFIRMATION_REPORTS,
+        REQUIRED_CONFIRMATION_REPORTS,
+        Timer,
+    },
 };
-use crate::descriptor::{
-    Character,
-    ChessClockBehavior,
-    ClockMode,
-    DIGIT_POSITIONS,
-    DigitPosition,
-    DigitQuartet,
-    Player, code_b,
-};
-use core::ops::DerefMut;
 
+pub struct ConsumedBeep {
+    pub tone: u8,
+    pub volume: u8,
+}
+
+#[derive(Clone, Copy, PartialEq)]
 pub struct ChessClock {
     beep: bool,
+    pub beep_tone: u8,
+    pub beep_volume: u8,
     ctrl_pressed_confirmations: Option<u16>,
-    increment_millis: [u32; 2],
+    pub delay_millis: [u32; 2],
+    pub increment_millis: [u32; 2],
     mode: ClockMode,
     target: Option<Player>,
-    timers: [Timer; 2],
+    pub timers: [Timer; 2],
     tock: bool,
     requires_refresh: bool,
 }
 
 impl ChessClock {
-    pub const fn new() -> Self {
-        Self {
-            beep: false,
-            ctrl_pressed_confirmations: None,
-            increment_millis: [
-                5000,
-                5000,
-            ],
-            mode: ClockMode::Play,
-            requires_refresh: false,
-            target: None,
-            timers: [
-                Timer::new(900000, 200),
-                Timer::new(900000, 200),
-            ],
-            tock: false,
+    pub const fn new(config: Option<ChessClockConfig>) -> Self {
+        match config {
+            Some(chess_clock_config) => {
+                return Self {
+                    beep: false,
+                    beep_tone: chess_clock_config.beep_tone(),
+                    beep_volume: chess_clock_config.beep_volume(),
+                    ctrl_pressed_confirmations: None,
+                    delay_millis: [
+                        chess_clock_config.delay_millis(Player::A),
+                        chess_clock_config.delay_millis(Player::B),
+                    ],
+                    increment_millis: [
+                        chess_clock_config.increment_millis(Player::A),
+                        chess_clock_config.increment_millis(Player::B),
+                    ],
+                    mode: ClockMode::Play,
+                    requires_refresh: false,
+                    target: None,
+                    timers: [
+                        Timer::new(chess_clock_config.duration_millis(Player::A), 200),
+                        Timer::new(chess_clock_config.duration_millis(Player::B), 200),
+                    ],
+                    tock: false,
+                };
+            },
+            None => {
+                return Self {
+                    beep: false,
+                    beep_tone: 0,
+                    beep_volume: 0,
+                    ctrl_pressed_confirmations: None,
+                    delay_millis: [0, 0],
+                    increment_millis: [0, 0],
+                    mode: ClockMode::Play,
+                    requires_refresh: false,
+                    target: None,
+                    timers: [Timer::new(600000, 200), Timer::new(600000, 200)],
+                    tock: false,
+                };
+            }
         }
     }
 
-    pub fn consume_beep(&mut self) -> bool {
+    pub fn consume_beep(&mut self) -> Option<ConsumedBeep> {
         if self.beep {
             self.beep = false;
-            return true;
+            if self.beep_volume == 0 {
+                return None;
+            }
+            return Some(ConsumedBeep {
+                tone: self.beep_tone,
+                volume: self.beep_volume,
+            });
         }
-        return false;
+        return None;
     }
 
     pub fn get_target(&self) -> Option<Player> {
@@ -250,9 +291,36 @@ impl ChessClock {
     pub fn get_digits(&self, player: Player) -> DigitQuartet {
         let mut digits = DigitQuartet::new();
 
-        let mut clock_ms = self.timers[player.own_idx()].remaining();
-        let mut digit_value: u32 = 600000;
+        // Detect special non-time screens
+        // TODO => Player A should probably be on the left, not player b. The prototype is reversed.
+        if player == Player::B {
+            match self.mode {
+                ClockMode::SetBeepTone |
+                ClockMode::SetBeepVolume => {
+                    // TODO => eliminate colon
+                    // BE:EP
+                    digits.set(DigitPosition::Decaminute, code_b::EIGHT);
+                    digits.set(DigitPosition::Minute, code_b::E);
+                    digits.set(DigitPosition::Decasecond, code_b::E);
+                    digits.set(DigitPosition::Second, code_b::P);
+                    return digits;
+                }
+                _ => {},
+            }
+        }
 
+        let mut clock_ms = match self.mode {
+            ClockMode::SetBeepTone => (self.beep_tone as u32) * 1000,
+            ClockMode::SetBeepVolume => (self.beep_volume as u32) * 1000,
+            ClockMode::SetSecondInterval |
+            ClockMode::SetDecasecondInterval => self.increment_millis[player.own_idx()],
+            ClockMode::Play |
+            ClockMode::SetDecaminute |
+            ClockMode::SetMinute |
+            ClockMode::SetDecasecond |
+            ClockMode::SetSecond => self.timers[player.own_idx()].remaining(),
+        };
+        let mut digit_value: u32 = 600000;
         for digit_position in DIGIT_POSITIONS {
             let mut clock_digit: Character = 0b0000_0000;
             while clock_ms >= digit_value {
@@ -260,17 +328,42 @@ impl ChessClock {
                 clock_ms = clock_ms - digit_value;
             }
             digit_value = if digit_position == DigitPosition::Minute {digit_value / 6} else {digit_value / 10};
-            if clock_digit != 0 || digit_position != DigitPosition::Decaminute {
-                digits.set(digit_position, clock_digit);
-            }
+            digits.set(digit_position, clock_digit);
         }
 
+        // Post-process the digits in special cases
+        match self.mode {
+            ClockMode::SetBeepTone => {
+                // BE:EP | HL: # (high/low)
+                digits.set(DigitPosition::Decaminute, code_b::H);
+                digits.set(DigitPosition::Minute, code_b::L);
+                digits.set(DigitPosition::Decasecond, code_b::BLANK);
+            },
+            ClockMode::SetBeepVolume => {
+                // BE:EP | LS: # (loud/soft)
+                digits.set(DigitPosition::Decaminute, code_b::L);
+                digits.set(DigitPosition::Minute, code_b::FIVE);
+                digits.set(DigitPosition::Decasecond, code_b::BLANK);
+            },
+            ClockMode::Play => {
+                if digits.get(DigitPosition::Decaminute) == code_b::ZERO {
+                    digits.set(DigitPosition::Decaminute, code_b::BLANK);
+                }
+            }
+            _ => {},
+        }
+
+        // If editing a value, flash it 
         if self.tock && self.mode != ClockMode::Play {
             let blank_digit_idx = match self.mode {
                 ClockMode::SetDecaminute => DigitPosition::Decaminute,
                 ClockMode::SetMinute => DigitPosition::Minute,
                 ClockMode::SetDecasecond => DigitPosition::Decasecond,
                 ClockMode::SetSecond => DigitPosition::Second,
+                ClockMode::SetDecasecondInterval => DigitPosition::Decasecond,
+                ClockMode::SetSecondInterval => DigitPosition::Second,
+                ClockMode::SetBeepTone => DigitPosition::Second,
+                ClockMode::SetBeepVolume => DigitPosition::Second,
                 _ => DigitPosition::Second,
             };
             digits.set(blank_digit_idx, code_b::BLANK);
@@ -346,7 +439,7 @@ impl ChessClock {
             ClockMode::SetDecaminute => {
                 match actor {
                     Some(player) => {
-                        if ((self.timers[player.own_idx()].remaining() % 6000000) + 600000) >= 6000000 {
+                        if self.timers[player.own_idx()].remaining() >= 5400000 {
                             self.timers[player.own_idx()].decrement(5400000);
                         } else {
                             self.timers[player.own_idx()].increment(600000);
@@ -354,16 +447,7 @@ impl ChessClock {
                         return Some(ChessClockBehavior::EditTime);
                     }
                     None => {
-                        if apply_mod {
-                            for player in [Player::A, Player::B] {
-                                self.timers[player.own_idx()].reset_to_remaining()
-                            }
-                            self.requires_refresh = true;
-                            self.mode = ClockMode::Play;
-                        } else {
-                            self.mode = ClockMode::SetMinute;
-                        }
-                        return Some(ChessClockBehavior::ChangeMode);
+                        return self.take_neutral_action(apply_mod, ClockMode::SetMinute);
                     }
                 }
             },
@@ -378,16 +462,7 @@ impl ChessClock {
                         return Some(ChessClockBehavior::EditTime);
                     }
                     None => {
-                        if apply_mod {
-                            for player in [Player::A, Player::B] {
-                                self.timers[player.own_idx()].reset_to_remaining()
-                            }
-                            self.requires_refresh = true;
-                            self.mode = ClockMode::Play;
-                        } else {
-                            self.mode = ClockMode::SetDecasecond;
-                        }
-                        return Some(ChessClockBehavior::ChangeMode);
+                        return self.take_neutral_action(apply_mod, ClockMode::SetDecasecond);
                     }
                 }
             },
@@ -402,16 +477,7 @@ impl ChessClock {
                         return Some(ChessClockBehavior::EditTime);
                     }
                     None => {
-                        if apply_mod {
-                            for player in [Player::A, Player::B] {
-                                self.timers[player.own_idx()].reset_to_remaining()
-                            }
-                            self.requires_refresh = true;
-                            self.mode = ClockMode::Play;
-                        } else {
-                            self.mode = ClockMode::SetSecond;
-                        }
-                        return Some(ChessClockBehavior::ChangeMode);
+                        return self.take_neutral_action(apply_mod, ClockMode::SetSecond);
                     }
                 }
             },
@@ -426,22 +492,115 @@ impl ChessClock {
                         return Some(ChessClockBehavior::EditTime);
                     }
                     None => {
-                        if apply_mod {
-                            for player in [Player::A, Player::B] {
-                                self.timers[player.own_idx()].reset_to_remaining()
-                            }
-                            self.requires_refresh = true;
-                            self.mode = ClockMode::Play;
+                        return self.take_neutral_action(apply_mod, ClockMode::SetDecasecondInterval);
+                    }
+                }
+            },
+            ClockMode::SetDecasecondInterval => {
+                match actor {
+                    Some(player) => {
+                        self.increment_millis[player.own_idx()];
+                        if ((self.increment_millis[player.own_idx()] % 60000) + 10000) >= 60000 {
+                            self.increment_millis[player.own_idx()] -= 50000;
                         } else {
-                            self.mode = ClockMode::SetDecaminute;
+                            self.increment_millis[player.own_idx()] += 10000;
                         }
-                        return Some(ChessClockBehavior::ChangeMode);
+                        return Some(ChessClockBehavior::EditTime);
+                    }
+                    None => {
+                        return self.take_neutral_action(apply_mod, ClockMode::SetSecondInterval);
+                    }
+                }
+            },
+            ClockMode::SetSecondInterval => {
+                match actor {
+                    Some(player) => {
+                        self.increment_millis[player.own_idx()];
+                        if ((self.increment_millis[player.own_idx()] % 10000) + 1000) >= 10000 {
+                            self.increment_millis[player.own_idx()] -= 9000;
+                        } else {
+                            self.increment_millis[player.own_idx()] += 1000;
+                        }
+                        return Some(ChessClockBehavior::EditTime);
+                    }
+                    None => {
+                        return self.take_neutral_action(apply_mod, ClockMode::SetBeepTone);
+                    }
+                }
+            },
+            ClockMode::SetBeepTone => {
+                match actor {
+                    Some(Player::A) => {
+                        if self.beep_tone == 0 {
+                            self.beep_tone = 5;
+                        } else {
+                            self.beep_tone -= 1;
+                        }
+                        self.beep = true;
+                        return Some(ChessClockBehavior::EditTime);
+                    },
+                    Some(Player::B) => {
+                        if self.beep_tone >= 5 {
+                            self.beep_tone = 0;
+                        } else {
+                            self.beep_tone += 1;
+                        }
+                        self.beep = true;
+                        return Some(ChessClockBehavior::EditTime);
+                    },
+                    None => {
+                        return self.take_neutral_action(apply_mod, ClockMode::SetBeepVolume);
+                    }
+                }
+            },
+            ClockMode::SetBeepVolume => {
+                match actor {
+                    Some(Player::A) => {
+                        if self.beep_volume == 0 {
+                            self.beep_volume = 3;
+                        } else {
+                            self.beep_volume -= 1;
+                        }
+                        if self.beep_volume > 0 {
+                            self.beep = true;
+                        }
+                        return Some(ChessClockBehavior::EditTime);
+                    },
+                    Some(Player::B) => {
+                        if self.beep_volume >= 3 {
+                            self.beep_volume = 0;
+                        } else {
+                            self.beep_volume += 1;
+                        }
+                        if self.beep_volume > 0 {
+                            self.beep = true;
+                        }
+                        return Some(ChessClockBehavior::EditTime);
+                    },
+                    None => {
+                        return self.take_neutral_action(apply_mod, ClockMode::SetDecaminute);
                     }
                 }
             },
         }
 
         return None;
+    }
+
+    fn take_neutral_action(&mut self, apply_mod: bool, next_mode: ClockMode) -> Option<ChessClockBehavior> {
+        if apply_mod {
+            for player in [Player::A, Player::B] {
+                self.timers[player.own_idx()].reset_to_remaining()
+            }
+            self.requires_refresh = true;
+            unsafe {
+                ChessClockConfig::from(*self).persist(0);
+            }
+            self.mode = ClockMode::Play;
+        } else {
+            self.mode = next_mode;
+        }
+        return Some(ChessClockBehavior::ChangeMode);
     }
 
     pub unsafe fn tick(&mut self) {

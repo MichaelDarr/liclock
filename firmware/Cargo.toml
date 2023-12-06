@@ -17,6 +17,13 @@ panic-halt = "0.2.0"
 path = "../../avr-device"
 features = ["attiny84a", "rt"]
 
+[dependencies.attiny-hal]
+path = "../../avr-hal/mcu/attiny-hal"
+features = ["attiny84a"]
+
+[dependencies.avr-hal-generic]
+path = "../../avr-hal/avr-hal-generic"
+
 [profile.dev]
 codegen-units = 1
 lto = true

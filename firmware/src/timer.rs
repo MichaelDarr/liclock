@@ -3,9 +3,9 @@ pub const REQUIRED_CONFIRMATION_REPORTS: u16 = 12;
 // ~0.8s
 pub const LONGPRESS_CONFIRMATION_REPORTS: u16 = 8000;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct Timer {
-    duration_millis: u32,
+    pub duration_millis: u32,
     is_running: bool,
     remaining_millis: u32,
     tick_interval_millis: u32,
