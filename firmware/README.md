@@ -24,12 +24,12 @@ avrdude \
 
 ### High Byte
 
-**0b1101_0100** (default `0b1101_1111`/`df`)
+**0b1101_0101** (default `0b1101_1111`/`df`)
 
 * Keep reset pin enabled
 * No watchdog timer
 * Preserve EEPROM memory through chip erase
-* Enable brown-out detector, 4.10V-4.5V
+* Enable brown-out detector, 2.7V
 
 ```sh
 avrdude \
@@ -37,5 +37,18 @@ avrdude \
   -P /dev/ttyACM0 \
   -c avrisp \
   -b 19200 \
-  -U hfuse:w:0xd4:m
+  -U hfuse:w:0xd5:m
+```
+
+### Sanity Check
+
+To output the clock on pin 5, program CKOUT
+
+```sh
+avrdude \
+  -p t84a \
+  -P /dev/ttyACM0 \
+  -c avrisp \
+  -b 19200 \
+  -U lfuse:w:0xbf:m
 ```
