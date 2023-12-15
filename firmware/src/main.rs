@@ -22,6 +22,7 @@ use avr_device::{
 use chess_clock::ChessClock;
 use config::ChessClockConfig;
 use core::{
+    arch::asm,
     cell::RefCell,
     ops::DerefMut,
 };
@@ -129,131 +130,111 @@ fn TIM0_COMPA() {
         unsafe {
             let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
             let chess_clock_ref = chess_clock.deref_mut();
-            
-            if let Some(ref mut tc0) = TC0.borrow(cs).borrow_mut().deref_mut() {
-                if let Some(ref mut porta) = PORTA.borrow(cs).borrow_mut().deref_mut() {
-                    // b high, a high, mux1_enable high: enable sw3
-                    porta.porta.modify(|r, w| w.bits(
-                        r.bits() | 0b0000_0111
-                    ));
 
-                    let mut start_time = tc0.tcnt0.read().bits();
-                    'wait_sw3: loop {
-                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 2 {
-                            chess_clock_ref.record_keystate(None, porta.pina.read().pa3().bit_is_clear());
-                            break 'wait_sw3;
-                        }
-                    }
+            if let Some(ref mut porta) = PORTA.borrow(cs).borrow_mut().deref_mut() {
+                // b high, a high, mux1_enable high: enable sw3
+                porta.porta.modify(|r, w| w.bits(
+                    r.bits() | 0b0000_0111
+                ));
+                asm!("nop", "nop");
+                chess_clock_ref.record_keystate(None, porta.pina.read().pa3().bit_is_clear());
 
-                    // a low: enable sw1
-                    porta.porta.modify(|r, w| w.bits(
-                        r.bits() & 0b1111_1101
-                    ));
+                // a low: enable sw1
+                porta.porta.modify(|r, w| w.bits(
+                    r.bits() & 0b1111_1101
+                ));
+                asm!("nop", "nop");
+                chess_clock_ref.record_keystate(Some(Player::A), porta.pina.read().pa3().bit_is_clear());
 
-                    start_time = tc0.tcnt0.read().bits();
-                    'wait_sw1: loop {
-                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 2 {
-                            chess_clock_ref.record_keystate(Some(Player::A), porta.pina.read().pa3().bit_is_clear());
-                            break 'wait_sw1;
-                        }
-                    }
+                // mux1_enable low: enable sw2
+                porta.porta.modify(|r, w| w.bits(
+                    r.bits() & 0b1111_1110
+                ));
+                asm!("nop", "nop");
+                chess_clock_ref.record_keystate(Some(Player::B), porta.pina.read().pa3().bit_is_clear());
 
-                    // mux1_enable low: enable sw2
-                    porta.porta.modify(|r, w| w.bits(
-                        r.bits() & 0b1111_1110
-                    ));
-
-                    start_time = tc0.tcnt0.read().bits();
-                    'wait_sw2: loop {
-                        if tc0.tcnt0.read().bits().wrapping_sub(start_time) >= 2 {
-                            chess_clock_ref.record_keystate(Some(Player::B), porta.pina.read().pa3().bit_is_clear());
-                            break 'wait_sw2;
-                        }
-                    }
-
-                    match chess_clock_ref.get_target() {
-                        Some(Player::A) => {
-                            // Drive ~{led_1} low
-                            // * mux_2 enabled
-                            // * a low
-                            // * b low
+                match chess_clock_ref.get_target() {
+                    Some(Player::A) => {
+                        // Drive ~{led_1} low
+                        // * mux_2 enabled
+                        // * a low
+                        // * b low
+                        porta.porta.write(|w| w.bits(
+                            0b1111_1001
+                        ));
+                    },
+                    Some(Player::B) => {
+                        // Drive ~{led_2} low
+                        // * mux_2 enabled
+                        // * a high
+                        // * b low
+                        porta.porta.write(|w| w.bits(
+                            0b1111_1011
+                        ));
+                    },
+                    None => {
+                        // Target both LEDs (alternate)
+                        // * mux_2 enabled
+                        // * a toggle
+                        // * b low
+                        if *SIMUL_LED_TOGGLE {
                             porta.porta.write(|w| w.bits(
                                 0b1111_1001
                             ));
-                        },
-                        Some(Player::B) => {
-                            // Drive ~{led_2} low
-                            // * mux_2 enabled
-                            // * a high
-                            // * b low
+                        } else {
                             porta.porta.write(|w| w.bits(
                                 0b1111_1011
                             ));
-                        },
-                        None => {
-                            // Target both LEDs (alternate)
-                            // * mux_2 enabled
-                            // * a toggle
-                            // * b low
-                            if *SIMUL_LED_TOGGLE {
-                                porta.porta.write(|w| w.bits(
-                                    0b1111_1001
-                                ));
-                            } else {
-                                porta.porta.write(|w| w.bits(
-                                    0b1111_1011
-                                ));
+                        }
+                        *SIMUL_LED_TOGGLE = !*SIMUL_LED_TOGGLE
+                    },
+                }
+
+                if let Some(beep) = chess_clock.consume_beep() {
+                    porta.porta.modify(|r, w| w.bits(
+                        (r.bits() | 0b0000_0110) & 0b1111_1110
+                    ));
+                    if let Some(ref mut tc1) = TC1.borrow(cs).borrow_mut().deref_mut() {
+                        let beep_cycle_duration = 210 - (beep.tone * 30);
+                        let beep_cycle_duration_16 = beep_cycle_duration as u16;
+                        let beep_cycle_midpoint = match beep.volume {
+                            // 0.5% duty cycle
+                            1 => {
+                                beep_cycle_duration - beep_cycle_duration.div_ceil(200)
                             }
-                            *SIMUL_LED_TOGGLE = !*SIMUL_LED_TOGGLE
-                        },
-                    }
+                            // 3% duty cycle
+                            2 => {
+                                beep_cycle_duration - beep_cycle_duration.div_ceil(33)
+                            }
+                            // 50% duty cycle
+                            _ => {
+                                beep_cycle_duration.div_ceil(2)
+                            },
+                        };
 
-                    if let Some(beep) = chess_clock.consume_beep() {
-                        porta.porta.modify(|r, w| w.bits(
-                            (r.bits() | 0b0000_0110) & 0b1111_1110
-                        ));
-                        if let Some(ref mut tc1) = TC1.borrow(cs).borrow_mut().deref_mut() {
-                            let beep_cycle_duration = 210 - (beep.tone * 30);
-                            let beep_cycle_duration_16 = beep_cycle_duration as u16;
-                            let beep_cycle_midpoint = match beep.volume {
-                                // 0.5% duty cycle
-                                1 => {
-                                    beep_cycle_duration - beep_cycle_duration.div_ceil(200)
-                                }
-                                // 3% duty cycle
-                                2 => {
-                                    beep_cycle_duration - beep_cycle_duration.div_ceil(33)
-                                }
-                                // 50% duty cycle
-                                _ => {
-                                    beep_cycle_duration.div_ceil(2)
-                                },
-                            };
-
-                            let mut beep_duration_remaining: u16 = 15000;
-                            'wait_buzz_instance: loop {
-                                let cycle_start_time = tc1.tcnt1.read().bits();
-                                let mut buzz_cycle_high = false;
-                                'wait_buzz_cycle: loop {
-                                    if buzz_cycle_high {
-                                        if (tc1.tcnt1.read().bits().wrapping_sub(cycle_start_time) as u8) >= beep_cycle_duration {
-                                                porta.porta.modify(|r, w| w.bits(
-                                                    r.bits() & 0b1111_1110
-                                                ));
-                                            break 'wait_buzz_cycle;
-                                        }
-                                    } else if (tc1.tcnt1.read().bits().wrapping_sub(cycle_start_time) as u8) >= beep_cycle_midpoint {
-                                        buzz_cycle_high = true;
-                                        porta.porta.modify(|r, w| w.bits(
-                                            r.bits() | 0b0000_0001
-                                        ));
+                        let mut beep_duration_remaining: u16 = 15000;
+                        'wait_buzz_instance: loop {
+                            let cycle_start_time = tc1.tcnt1.read().bits();
+                            let mut buzz_cycle_high = false;
+                            'wait_buzz_cycle: loop {
+                                if buzz_cycle_high {
+                                    if (tc1.tcnt1.read().bits().wrapping_sub(cycle_start_time) as u8) >= beep_cycle_duration {
+                                            porta.porta.modify(|r, w| w.bits(
+                                                r.bits() & 0b1111_1110
+                                            ));
+                                        break 'wait_buzz_cycle;
                                     }
+                                } else if (tc1.tcnt1.read().bits().wrapping_sub(cycle_start_time) as u8) >= beep_cycle_midpoint {
+                                    buzz_cycle_high = true;
+                                    porta.porta.modify(|r, w| w.bits(
+                                        r.bits() | 0b0000_0001
+                                    ));
                                 }
-                                if beep_duration_remaining < beep_cycle_duration_16 {
-                                    break 'wait_buzz_instance;
-                                }
-                                beep_duration_remaining -= beep_cycle_duration_16;
                             }
+                            if beep_duration_remaining < beep_cycle_duration_16 {
+                                break 'wait_buzz_instance;
+                            }
+                            beep_duration_remaining -= beep_cycle_duration_16;
                         }
                     }
                 }
