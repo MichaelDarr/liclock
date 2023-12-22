@@ -92,6 +92,7 @@ impl DigitQuartet {
 #[derive(Clone, PartialEq)]
 pub enum ChessClockBehavior {
     ChangeMode,
+    CycleProfile,
     EditTime,
     Pause,
     Reset,

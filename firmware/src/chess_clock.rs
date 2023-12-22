@@ -32,6 +32,8 @@ pub struct ChessClock {
     pub beep_tone: u8,
     pub beep_volume: u8,
     ctrl_pressed_confirmations: Option<u16>,
+    pub cycle_profile_pending: bool,
+    pub profile_offset: u16,
     pub delay_millis: [u32; 2],
     pub increment_millis: [u32; 2],
     mode: ClockMode,
@@ -50,6 +52,7 @@ impl ChessClock {
                     beep_tone: chess_clock_config.beep_tone(),
                     beep_volume: chess_clock_config.beep_volume(),
                     ctrl_pressed_confirmations: None,
+                    cycle_profile_pending: false,
                     delay_millis: [
                         chess_clock_config.delay_millis(Player::A),
                         chess_clock_config.delay_millis(Player::B),
@@ -59,7 +62,8 @@ impl ChessClock {
                         chess_clock_config.increment_millis(Player::B),
                     ],
                     mode: ClockMode::Play,
-                    requires_refresh: false,
+                    profile_offset: chess_clock_config.profile_offset,
+                    requires_refresh: true,
                     target: None,
                     timers: [
                         Timer::new(chess_clock_config.duration_millis(Player::A), 200),
@@ -74,10 +78,12 @@ impl ChessClock {
                     beep_tone: 0,
                     beep_volume: 0,
                     ctrl_pressed_confirmations: None,
+                    cycle_profile_pending: false,
                     delay_millis: [0, 0],
                     increment_millis: [0, 0],
                     mode: ClockMode::Play,
-                    requires_refresh: false,
+                    profile_offset: 0,
+                    requires_refresh: true,
                     target: None,
                     timers: [Timer::new(600000, 200), Timer::new(600000, 200)],
                     tock: false,
@@ -384,7 +390,6 @@ impl ChessClock {
                             Some(target) => {
                                 // if it's the actors turn and time is still on their clock, beep and switch turns
                                 if *target == player && !self.timers[player.own_idx()].is_expired() {
-                                    // TODO => disable beep according to programming
                                     self.beep = true;
                                     self.target = Some(player.opponent());
                                     self.timers[player.own_idx()].halt();
@@ -395,7 +400,6 @@ impl ChessClock {
                             }
                             // resume
                             None => {
-                                // TODO => disable beep according to programming
                                 self.beep = true;
                                 self.target = Some(player.opponent());
                                 self.timers[player.opponent_idx()].run();
@@ -426,6 +430,11 @@ impl ChessClock {
                                 },
                                 // reset
                                 None => {
+                                    // Cycle through profiles if the clock is already stopped with full time remaining.
+                                    if self.timers[Player::A.own_idx()].is_preliminary() && self.timers[Player::B.own_idx()].is_preliminary() {
+                                        self.cycle_profile_pending = true;
+                                        return Some(ChessClockBehavior::CycleProfile);
+                                    }
                                     for i in 0..2 {
                                         self.timers[i].reset();
                                     }
@@ -594,7 +603,7 @@ impl ChessClock {
             }
             self.requires_refresh = true;
             unsafe {
-                ChessClockConfig::from(*self).persist(0);
+                ChessClockConfig::from(*self).persist(self.profile_offset);
             }
             self.mode = ClockMode::Play;
         } else {

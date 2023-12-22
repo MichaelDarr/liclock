@@ -5,7 +5,7 @@ default:
 
 .PHONY: build
 build:
-	cargo build
+	cargo build -r
 
 .PHONY: flash
 flash: SHELL:=/bin/bash
@@ -15,4 +15,4 @@ flash:
     -P /dev/ttyACM0 \
     -c avrisp \
     -b 250000 \
-    -U{eeprom,flash,{l,h}fuse,lock}:w:"$(CURDIR)/target/avr-attiny84a/debug/liclock.elf":e
+    -U{eeprom,flash,{l,h}fuse,lock}:w:"$(CURDIR)/target/avr-attiny84a/release/liclock.elf":e

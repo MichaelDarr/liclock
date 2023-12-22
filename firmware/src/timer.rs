@@ -46,6 +46,11 @@ impl Timer {
         self.remaining_millis == 0
     }
 
+    // Returns true if the clock is not running and has no time elapsed
+    pub fn is_preliminary(&self) -> bool {
+        !self.is_running && self.duration_millis == self.remaining_millis
+    }
+
     // Pause the timer.
     // This has no effect if the timer is not running (paused or elapsed).
     pub fn halt(&mut self) {

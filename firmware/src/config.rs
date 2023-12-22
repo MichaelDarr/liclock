@@ -45,6 +45,7 @@ use crate::{
 // └───────┴────────┸───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┘
 pub struct ChessClockConfig {
   data: [u8; 16],
+  pub profile_offset: u16
 }
 
 impl From<ChessClock> for ChessClockConfig {
@@ -62,7 +63,7 @@ impl From<ChessClock> for ChessClockConfig {
         }
         data[8] = chess_clock.beep_volume | (chess_clock.beep_tone << 4);
 
-        return ChessClockConfig{data};
+        return ChessClockConfig{data, profile_offset: chess_clock.profile_offset};
     }
 }
 
@@ -86,7 +87,7 @@ impl ChessClockConfig {
                             // TODO => handle?
                             panic!("failed to read eeprom")
                         }
-                        return ChessClockConfig{data};
+                        return ChessClockConfig{data, profile_offset: config_offset};
                     } else {
                         // TODO => handle?
                         panic!("failed to get eeprom")
@@ -96,6 +97,7 @@ impl ChessClockConfig {
             None => {
                 return ChessClockConfig{
                     data: [0_u8; 16],
+                    profile_offset: 0,
                 }
             }
         }

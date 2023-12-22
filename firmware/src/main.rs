@@ -5,7 +5,6 @@
 #![feature(asm_experimental_arch)]
 #![allow(internal_features)]
 #![feature(int_roundings)]
-#![feature(cell_update)]
 
 mod chess_clock;
 mod config;
@@ -125,6 +124,9 @@ fn main() -> ! {
 #[interrupt(attiny84a)]
 fn TIM0_COMPA() {
     static mut SIMUL_LED_TOGGLE: bool = true;
+    static mut CUR_CLOCK_PROFILE: u8 = 0;
+
+    let mut profile_cycle_pending = false;
 
     interrupt::free(|cs| {
         unsafe {
@@ -190,7 +192,9 @@ fn TIM0_COMPA() {
                     },
                 }
 
-                if let Some(beep) = chess_clock.consume_beep() {
+                if chess_clock.cycle_profile_pending {
+                    profile_cycle_pending = true;
+                } else if let Some(beep) = chess_clock.consume_beep() {
                     porta.porta.modify(|r, w| w.bits(
                         (r.bits() | 0b0000_0110) & 0b1111_1110
                     ));
@@ -238,6 +242,17 @@ fn TIM0_COMPA() {
                         }
                     }
                 }
+            }
+        }
+
+        if profile_cycle_pending {
+            if *CUR_CLOCK_PROFILE == 3 {
+                *CUR_CLOCK_PROFILE = 0;
+            } else {
+                *CUR_CLOCK_PROFILE += 1;
+            }
+            unsafe {
+                CHESS_CLOCK.borrow(cs).replace(ChessClock::new(Some(ChessClockConfig::new(Some((*CUR_CLOCK_PROFILE as u16) * 128)))));
             }
         }
     });
