@@ -30,3 +30,7 @@ fp-info-cache
 
 # Lockfiles
 *.lck
+
+# backups
+liclock-backups
+pcb-backups
