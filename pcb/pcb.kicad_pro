@@ -470,7 +470,7 @@
       "step": "",
       "vrml": ""
     },
-    "page_layout_descr_file": "/home/michael/.local/share/kicad/7.0/template/med_co.kicad_wks"
+    "page_layout_descr_file": "${KIPRJMOD}/liclock.kicad_wks"
   },
   "schematic": {
     "annotate_start_num": 0,
@@ -497,7 +497,7 @@
     },
     "net_format_name": "",
     "page_layout_descr_file": "${KICAD_USER_TEMPLATE_DIR}/med_co.kicad_wks",
-    "plot_directory": "/home/michael/schematic_ex/",
+    "plot_directory": "${KIPRJMOD}",
     "spice_current_sheet_as_root": false,
     "spice_external_command": "spice \"%I\"",
     "spice_model_current_sheet_as_root": true,
