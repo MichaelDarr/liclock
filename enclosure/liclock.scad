@@ -26,11 +26,14 @@ module cutout_mx(x=0, y=0, z=0, lipHeight=1.5, lipDepth=2) {
                 rotate([0, 180, 0])
                     linear_extrude(height=8.3-lipHeight, center=false)
                         square([MXCutout+lipDepth, MXCutout+lipDepth], center=true);
-         }
+            // Above-lip cutout
+            linear_extrude(height=4.4-lipHeight, center=false)
+                square([MXCutout+lipDepth, MXCutout+lipDepth], center=true);
+        }
     }
 }
 
-module cutout_mcs_18_front(x=0, y=0, z=0, lipHeight=1.6) {
+module cutout_mcs_18_front(x=0, y=0, z=0, lipHeight=4.4) {
     // Cherry MX switch model
     translate([0, 0, lipHeight*-1])
     %import("mcs_18_front/mcs_18_front.stl");
@@ -63,7 +66,7 @@ module cutout_mcs_18_front(x=0, y=0, z=0, lipHeight=1.6) {
 }
 
 module cutout_lcd(x=0, y=0, z=0) {
-    translate([x, y, z])
+    translate([x, y+1.6, z-1.6])
         rotate([45, 0, 0])
             rotate([0, 0, 90])
                 %import("LCD-S401C71TR.stl");
@@ -73,8 +76,8 @@ module cutout_lcd(x=0, y=0, z=0) {
         translate([x, y, z])
             rotate([45, 0, 0])
                 rotate([0, 0, 90])
-                    linear_extrude(height=10, center=false, scale=[1.5,1.15])
-                        square([32.4, 65.4], center=true);
+                linear_extrude(height=7.5, center=false, scale=[1.75,1.2], twist=0, slices=20)
+                        square([22.86, 62.23], center=true);
     }
 }
 
@@ -126,17 +129,18 @@ module cutout_mounting_hole(x=0, y=0, z=0) {
 centerToTip = Length/2; // 87
 centerToSwitch = centerToTip-SwitchBezel-(MXCutout/2); // 87 - 7.4 - (14/2)
 
-translate([0, 0, 54]) {
+translate([0, 0, 49]) {
     // Top Face
-    cutout_mx(x=centerToSwitch) cutout_mx(x=centerToSwitch*-1) cutout_mcs_18_front()
-        rotate([0, 180, 0])
-            linear_extrude(height=5, center=false)
-                square([Length, 45], center=true);
+    translate([0, -7.8, -5])
+        cutout_mx(x=centerToSwitch, z=-2.8) cutout_mx(x=centerToSwitch*-1, z=-2.8) cutout_mcs_18_front()
+            rotate([0, 180, 0])
+                linear_extrude(height=7.8, center=false)
+                    square([Length, 26], center=true);
 
     // Body
-    cutout_lcd(x=42, y=-37.2, z=-28.8) cutout_lcd(x=-42, y=-37.2, z=-28.8)
-    cutout_power_switch(x=-73, y=20.8, z=-44)
-    cutout_mounting_hole(y=-44.4, z=-21.7) cutout_mounting_hole(x=84, y=-44.4, z=-21.7) cutout_mounting_hole(x=-84, y=-44.4, z=-21.7)
+    cutout_lcd(x=42, y=-36.7, z=-29.3) cutout_lcd(x=-42, y=-36.7, z=-29.3)
+    cutout_power_switch(x=-73, y=5.2, z=-39)
+    cutout_mounting_hole(y=-41.9, z=-24.2) cutout_mounting_hole(x=84, y=-41.9, z=-24.2) cutout_mounting_hole(x=-84, y=-41.9, z=-24.2)
         difference() {
             translate([0, 22.5, 0])
                 rotate([-90,0,0])
@@ -144,13 +148,14 @@ translate([0, 0, 54]) {
                         linear_extrude(height=Length, center=true)
                             polygon(
                                 points=[
-                                    [0,0],[45,0],[90,45],[90,54],[0,54],
-                                    [10,5],[40,5],[80,45],[80,54],[10,54]
+                                    [15.4,5],[45,5],[83,43],[83,49],[15.4,49],
+                                    [22,10],[40,10],[73,43],[73,49],[22,49]
                                 ],
                                 paths=[[0,1,2,3,4], [5,6,7,8,9]]
                             );
-            rotate([0, 180, 0])
-                linear_extrude(height=5, center=false)
-                    square([Length, 45], center=true);
+            translate([0, -7.8, -5])
+                rotate([0, 180, 0])
+                    linear_extrude(height=7.8, center=false)
+                        square([Length, 26], center=true);
         }
 }
