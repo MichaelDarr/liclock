@@ -1,7 +1,7 @@
 // tip-to-tip clock length
-Length = 174;
+Length = 178;
 // clock edge to switch cutout
-SwitchBezel = 7.4;
+SwitchBezel = 9.4;
 // side length for cherry mx cutouts
 MXCutout=14;
 
@@ -88,27 +88,43 @@ module cutout_power_switch(x=0, y=0, z=0) {
 
     difference() {
         children();
-    translate([x, y, z])
-        rotate([180,90,0])
-            rotate([0,0,180])
-                union() {
-                    scale([25.4,25.4,25.4])
-                        %import("CWSA11AAN1H.stl");
-                    translate([0, 1, 0])
-                        linear_extrude(height=21, center=true)
-                            square([15, 2], center=true);
-                    translate([0, -1, 0])
-                        linear_extrude(height=20, center=true)
-                            square([13, 2], center=true);
-                    translate([0, -8, 0])
-                        linear_extrude(height=20, center=true)
-                            square([12.4, 12], center=true);
-                }
+        translate([x, y, z])
+            rotate([180,90,0])
+                rotate([0,0,180])
+                    union() {
+                        scale([25.4,25.4,25.4])
+                            %import("CWSA11AAN1H.stl");
+                        translate([0, 1, 0])
+                            linear_extrude(height=21, center=true)
+                                square([15, 2], center=true);
+                        translate([0, -1, 0])
+                            linear_extrude(height=20, center=true)
+                                square([13, 2], center=true);
+                        translate([0, -8, 0])
+                            linear_extrude(height=20, center=true)
+                                square([12.4, 12], center=true);
+                    }
     }
 }
 
-centerToTip = Length/2;
-centerToSwitch = centerToTip-SwitchBezel-(MXCutout/2);
+module cutout_mounting_hole(x=0, y=0, z=0) {
+    difference() {
+        children();
+        translate([x, y, z]) {
+            rotate([45, 0, 0])
+                rotate([0, 180, 0])
+                    linear_extrude(height=12, center=false)
+                        circle(d=3.66, $fn=36);
+            rotate([45, 0, 0])
+                rotate([0, 180, 0])
+                    linear_extrude(height=2.2, center=false)
+                        circle(d=6.8, $fn=36);
+        }
+    }
+}
+
+centerToTip = Length/2; // 87
+centerToSwitch = centerToTip-SwitchBezel-(MXCutout/2); // 87 - 7.4 - (14/2)
 
 translate([0, 0, 54]) {
     // Top Face
@@ -117,7 +133,10 @@ translate([0, 0, 54]) {
             linear_extrude(height=5, center=false)
                 square([Length, 45], center=true);
 
-    cutout_lcd(x=42, y=-37.2, z=-28.8) cutout_lcd(x=-42, y=-37.2, z=-28.8) cutout_power_switch(x=-73, y=20.8, z=-44)
+    // Body
+    cutout_lcd(x=42, y=-37.2, z=-28.8) cutout_lcd(x=-42, y=-37.2, z=-28.8)
+    cutout_power_switch(x=-73, y=20.8, z=-44)
+    cutout_mounting_hole(y=-44.4, z=-21.7) cutout_mounting_hole(x=84, y=-44.4, z=-21.7) cutout_mounting_hole(x=-84, y=-44.4, z=-21.7)
         difference() {
             translate([0, 22.5, 0])
                 rotate([-90,0,0])
