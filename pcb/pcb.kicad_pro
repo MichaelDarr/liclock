@@ -56,8 +56,6 @@
         }
       ],
       "drc_exclusions": [
-        "courtyards_overlap|153081353|116450001|3f3f52d0-b0ca-4f0d-a219-2a22715f433b|bbcd18d9-70c6-468b-b0cf-2f8780cb7ce0",
-        "pth_inside_courtyard|149445000|115570600|7e2cd4ca-b4e4-42a3-bd85-2a0b7d17234c|3f3f52d0-b0ca-4f0d-a219-2a22715f433b",
         "silk_edge_clearance|146618387|91984000|a7027d92-3595-4d7f-adf4-abfcfb87ab44|6873309b-79a9-446a-8d76-1ba9ed1478e1"
       ],
       "meta": {
