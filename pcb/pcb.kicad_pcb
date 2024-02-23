@@ -3905,7 +3905,7 @@
       (net 102 "Net-(R7-Pad1)") (pinfunction "1") (pintype "passive") (tstamp 8c9345db-d811-434e-bd2f-8b4ba41e91f5))
     (pad "2" thru_hole circle (at 3.81 0 90) (size 2.2 2.2) (drill 1.2) (layers "*.Cu" "*.Mask")
       (net 98 "GND1") (pinfunction "2") (pintype "passive") (tstamp 6c969a3c-f6f4-4289-86dc-1efc0c4cccd7))
-    (model "/home/michael/projects/liclock/enclosure/mcs_18_front/mcs_18_front.step"
+    (model "${KIPRJMOD}/Clock-Parts.3dshapes/mcs_18_front.step"
       (offset (xyz 0 0 3))
       (scale (xyz 1 1 1))
       (rotate (xyz 0 0 0))
