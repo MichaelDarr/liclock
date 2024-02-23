@@ -7,264 +7,320 @@
 #![feature(int_roundings)]
 
 mod chess_clock;
-mod config;
 mod descriptor;
 mod timer;
 
 use panic_halt as _;
 
 use avr_device::{
-    attiny84a,
+    attiny1627::{self, Peripherals},
     interrupt,
-    interrupt::Mutex,
+    interrupt::{
+        CriticalSection,
+        Mutex,
+    },
 };
-use chess_clock::ChessClock;
-use config::ChessClockConfig;
 use core::{
-    arch::asm,
     cell::RefCell,
     ops::DerefMut,
 };
-use descriptor::{Eeprom, Player};
 
-pub static mut CHESS_CLOCK: Mutex<RefCell<ChessClock>> = Mutex::new(RefCell::new(ChessClock::new(None)));
-pub static mut EEPROM: Mutex<RefCell<Option<Eeprom>>> = Mutex::new(RefCell::new(None));
-pub static mut PORTA: Mutex<RefCell<Option<attiny84a::PORTA>>> = Mutex::new(RefCell::new(None));
-pub static mut PORTB: Mutex<RefCell<Option<attiny84a::PORTB>>> = Mutex::new(RefCell::new(None));
-pub static mut TC0: Mutex<RefCell<Option<attiny84a::TC0>>> = Mutex::new(RefCell::new(None));
-pub static mut TC1: Mutex<RefCell<Option<attiny84a::TC1>>> = Mutex::new(RefCell::new(None));
+use chess_clock::ChessClock;
+use descriptor::{
+    CHAR_POSITIONS,
+    CharQuartet,
+    CharPosition,
+    Player, ClockMode,
+};
+use timer::Timer;
+
+static mut CHESS_CLOCK: Mutex<RefCell<ChessClock>> = Mutex::new(RefCell::new(ChessClock::new()));
+static mut DP: Mutex<RefCell<Option<Peripherals>>> = Mutex::new(RefCell::new(None));
 
 #[avr_device::entry]
 fn main() -> ! {
-    let dp = attiny84a::Peripherals::take().unwrap();
+    let dp = attiny1627::Peripherals::take().unwrap();
 
-    unsafe {
-        // TC0: Normal mode, no prescaler
-        // * TOP = 0xFF
-        // * Update of OCRx at Immediate
-        // * TOV flag set on MAX
-        dp.TC0.tccr0b.write(|w| w.bits(0b0000_0010));
-        // Place the `A` output compare register at TOP
-        dp.TC0.ocr0a.write(|w| w.bits(255));
-        // Place the `B` output compare register in the middle (buzzer)
-        dp.TC0.ocr0b.write(|w| w.bits(100));
-        // enable `TIM0_COMPA` interrupt
-        dp.TC0.timsk0.write(|w| w.bits(0b0000_0010));
-
-        // Configure pins:
-        // PA0 | mux1_enable | output
-        // PA1 | mux_a       | output
-        // PA2 | mux_b       | output
-        // PA3 | sw_pull_up  | input
-        // PA4 | digit_2     | output
-        // PA5 | digit_1     | output
-        // PA6 | data_2      | output
-        // PA7 | data_1      | output
-        dp.PORTA.ddra.write(|w| w.bits(0b1111_0111));
-        // PB2 | data_0      | output
-        // PB3 | RESET       | floating (eventually disable reset, become data_3)
-        dp.PORTB.ddrb.write(|w| w.bits(0b0000_0100));
-
-        // Disable mux1, use sw_pull_up as a pull-up, default b (chip select 2) high
-        dp.PORTA.porta.write(|w| w.bits(0b0000_1101));
-
-        // | AVR Setting                    | Symbol           | Value         |
-        // | :----------------------------- | :--------------- | :------------ |
-        // | System Frequency Clock         | Fclk_I/0         | 20MHz         |
-        // | Clock Cycle Duration           | CK               | 50nS      1CK |
-        // | Timer/Clock 0 Cycle Duration   | TC0              | 400nS     8CK |
-        // | Timer/Clock 1 Cycle Duration   | TC1 (clkI/O/256) | 12800nS 256CK |
-        //
-        // ## TC1 ➡ Seconds:
-        // 78125CK1 == 1S == (0 ➡ 15625) × 5
-        // Count using fifth-of-second interval (200ms per interval)
-        //
-        // | Variable                       | Symbol   | Value          | Spec             | Description
-        // | :----------------------------- | :------- | :------------- | :--------------- | :----------
-        // | Data Setup Time                | tDSM     | 10μS     200CK | min: 100nS   2CK | WR high between digit transfer and double-low select active
-        // | Chip Select Active Pulse Width | tCSA     | 200nS      4CK | typ: 200nS   4CK | Both low
-        // | Data Hold Time                 | tDHM     | >250nS    >5CK | min: 10nS  0.2CK | Holding period between data transfer trigger and completion
-        // | Inter-Chip Select Time         | tICS     | 10.2μS   204CK | min: 2μS    20CK | WR cycle duration (tICS = tDSM + tCSA)
-
-
-        // TC1: Fast PWM (mode 14)
-        // * TOP = OCR1A
-        // * Update of 1CRx at TOP
-        // * TOV flag set on TOP
- 
-        // Set WGM11 & WGM10
-        dp.TC1.tccr1a.write(|w| w.bits(0b0000_0011));
-        // Set WGM12 & WGM13, prescale 256x
-        dp.TC1.tccr1b.write(|w| w.bits(0b0001_1100));
-        // tick the chess clock every 200ms
-        // (0 ➡ ocr1a) = 4000000CK = 200000000nS = 200 mS
-        dp.TC1.ocr1a.write(|w| w.bits(15624));
-        // enable `TIM1_OVF` interrupt
-        dp.TC1.timsk1.write(|w| w.bits(0b0000_0001));
+    // Set up the 32kHz oscillator (if not already enabled)
+    if dp.CLKCTRL.xosc32kctrla.read().bits() & 0b0000_0001 == 0 {
+        // Enable the 32kHz oscillator, even in standby
+        dp.CPU.ccp.write(|w| unsafe { w.bits(0b1101_1000)}); // disable write protection
+        dp.CLKCTRL.xosc32kctrla.write(|w| unsafe { w.bits(0b0000_0011)});
+        // Force the 32kHz oscillator ON in all modes
+        dp.CPU.ccp.write(|w| unsafe { w.bits(0b1101_1000)}); // disable write protection
+        dp.CLKCTRL.osc32kctrla.write(|w| unsafe { w.bits(0b0000_0010)});
     }
+
+    dp.RTC.clksel.write(|w| unsafe { w.bits(0b0000_0010)});
+
+    // Enable the real time clock with a 256 prescaler
+    // * 1 tick ≈ 8ms
+    // * 128 ticks per second
+    // * 500 second period
+    dp.RTC.ctrla.write(|w| unsafe { w.bits(0b1100_0001)});
+    // second-align the periodic interrupt timer
+    dp.RTC.pitctrla.write(|w| unsafe { w.bits(0b0111_0001)});
+    // enable periodic interrupt
+    dp.RTC.pitintctrl.write(|w| unsafe { w.bits(0b0000_0001)});
+
+    // Enable timer A
+    dp.TCA0.ctrla.write(|w| unsafe { w.bits(0b0000_0001)});
+
+    // Configure PA1..7 as output pins
+    dp.PORTA.dirset.write(|w| unsafe {
+        w.bits(0b1111_1110)
+    });
+    // Configure PB0 (low battery led), PB 4..7 (LCD control signals) as output pins
+    dp.PORTB.dirset.write(|w| unsafe {
+        w.bits(0b1111_0001)
+    });
+    // Configure PC1 (switch 1 led), PC3 (switch 2 led), and PC5 (buzzer) as output pins
+    dp.PORTC.dirset.write(|w| unsafe {
+        w.bits(0b0010_1010)
+    });
+
+    // Set up the three input pins attached to switches (pull-up, interrupt on falling edge)
+    dp.PORTC.pin0ctrl.write(|w| unsafe { w.bits(0b0000_1011) });
+    dp.PORTC.pin2ctrl.write(|w| unsafe { w.bits(0b0000_1011) });
+    dp.PORTC.pin4ctrl.write(|w| unsafe { w.bits(0b0000_1011) });
+
+    // Drive LEDs high
+    // dp.PORTC.outset.write(|w| unsafe {
+    //     w.bits(0b0000_1010)
+    // });
+
+    // Disable all LCD write pins
+    dp.PORTA.outset.write(|w| unsafe { w.bits(0b0000_1110) });
 
     unsafe {
         interrupt::free(|cs| {
-            EEPROM.borrow(cs).replace(Some(Eeprom::new(dp.EEPROM)));
-            PORTA.borrow(cs).replace(Some(dp.PORTA));
-            PORTB.borrow(cs).replace(Some(dp.PORTB));
-            TC0.borrow(cs).replace(Some(dp.TC0));
-            TC1.borrow(cs).replace(Some(dp.TC1));
-            CHESS_CLOCK.borrow(cs).replace(ChessClock::new(Some(ChessClockConfig::new(Some(0)))));
-            let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
-            let chess_clock_ref = chess_clock.deref_mut();
-            chess_clock_ref.render_full();
+            DP.borrow(cs).replace(Some(dp));
         });
+        interrupt::enable();
+    }
+
+    interrupt::free(|cs| unsafe {
+        let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
+        render(cs, chess_clock.get_digits(Player::A), Player::A, true);
+        render(cs, chess_clock.get_digits(Player::B), Player::B, true);
+    });
+
+    unsafe {
         interrupt::enable();
     }
 
     loop{}
 }
 
-#[interrupt(attiny84a)]
-fn TIM0_COMPA() {
-    static mut SIMUL_LED_TOGGLE: bool = true;
-    static mut CUR_CLOCK_PROFILE: u8 = 0;
 
-    let mut profile_cycle_pending = false;
+#[interrupt(attiny1627)]
+fn RTC_PIT() {
+    interrupt::free(|cs| unsafe {
+        if let Some(ref mut dp) = DP.borrow(cs).borrow_mut().deref_mut() {
+            dp.RTC.pitintflags.write(|w| {w.bits(0b0000_0001)});
+        }
+        let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
+        if let Some(active_player) = chess_clock.tick() {
+            render(cs, chess_clock.get_digits(active_player), active_player, true);
+        }
+    });
+}
 
-    interrupt::free(|cs| {
-        unsafe {
+#[interrupt(attiny1627)]
+fn PORTC_PORT() {
+    static mut PLAYER_A_PRESSED: u16 = 0;
+    static mut PLAYER_B_PRESSED: u16 = 0;
+    static mut CONTROL_PRESSED: u16 = 0;
+
+    let mut new_player_a_pressed = *PLAYER_A_PRESSED;
+    let mut new_player_b_pressed = *PLAYER_B_PRESSED;
+    let mut new_control_pressed = *CONTROL_PRESSED;
+
+    let mut chars_a: Option<CharQuartet> = None;
+    let mut chars_b: Option<CharQuartet> = None;
+
+    interrupt::free(|cs| unsafe {
+        if let Some(ref mut dp) = DP.borrow(cs).borrow_mut().deref_mut() {
             let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
-            let chess_clock_ref = chess_clock.deref_mut();
 
-            if let Some(ref mut porta) = PORTA.borrow(cs).borrow_mut().deref_mut() {
-                // b high, a high, mux1_enable high: enable sw3
-                porta.porta.modify(|r, w| w.bits(
-                    r.bits() | 0b0000_0111
-                ));
-                asm!("nop", "nop");
-                chess_clock_ref.record_keystate(None, porta.pina.read().pa3().bit_is_clear());
-
-                // a low: enable sw1
-                porta.porta.modify(|r, w| w.bits(
-                    r.bits() & 0b1111_1101
-                ));
-                asm!("nop", "nop");
-                chess_clock_ref.record_keystate(Some(Player::A), porta.pina.read().pa3().bit_is_clear());
-
-                // mux1_enable low: enable sw2
-                porta.porta.modify(|r, w| w.bits(
-                    r.bits() & 0b1111_1110
-                ));
-                asm!("nop", "nop");
-                chess_clock_ref.record_keystate(Some(Player::B), porta.pina.read().pa3().bit_is_clear());
-
-                match chess_clock_ref.get_target() {
-                    Some(Player::A) => {
-                        // Drive ~{led_1} low
-                        // * mux_2 enabled
-                        // * a low
-                        // * b low
-                        porta.porta.write(|w| w.bits(
-                            0b1111_1001
-                        ));
-                    },
-                    Some(Player::B) => {
-                        // Drive ~{led_2} low
-                        // * mux_2 enabled
-                        // * a high
-                        // * b low
-                        porta.porta.write(|w| w.bits(
-                            0b1111_1011
-                        ));
-                    },
-                    None => {
-                        // Target both LEDs (alternate)
-                        // * mux_2 enabled
-                        // * a toggle
-                        // * b low
-                        if *SIMUL_LED_TOGGLE {
-                            porta.porta.write(|w| w.bits(
-                                0b1111_1001
-                            ));
-                        } else {
-                            porta.porta.write(|w| w.bits(
-                                0b1111_1011
-                            ));
-                        }
-                        *SIMUL_LED_TOGGLE = !*SIMUL_LED_TOGGLE
-                    },
-                }
-
-                if chess_clock.cycle_profile_pending {
-                    profile_cycle_pending = true;
-                } else if let Some(beep) = chess_clock.consume_beep() {
-                    porta.porta.modify(|r, w| w.bits(
-                        (r.bits() | 0b0000_0110) & 0b1111_1110
-                    ));
-                    if let Some(ref mut tc1) = TC1.borrow(cs).borrow_mut().deref_mut() {
-                        let beep_cycle_duration = 210 - (beep.tone * 30);
-                        let beep_cycle_duration_16 = beep_cycle_duration as u16;
-                        let beep_cycle_midpoint = match beep.volume {
-                            // 0.5% duty cycle
-                            1 => {
-                                beep_cycle_duration - beep_cycle_duration.div_ceil(200)
-                            }
-                            // 3% duty cycle
-                            2 => {
-                                beep_cycle_duration - beep_cycle_duration.div_ceil(33)
-                            }
-                            // 50% duty cycle
-                            _ => {
-                                beep_cycle_duration.div_ceil(2)
-                            },
-                        };
-
-                        let mut beep_duration_remaining: u16 = 15000;
-                        'wait_buzz_instance: loop {
-                            let cycle_start_time = tc1.tcnt1.read().bits();
-                            let mut buzz_cycle_high = false;
-                            'wait_buzz_cycle: loop {
-                                if buzz_cycle_high {
-                                    if (tc1.tcnt1.read().bits().wrapping_sub(cycle_start_time) as u8) >= beep_cycle_duration {
-                                            porta.porta.modify(|r, w| w.bits(
-                                                r.bits() & 0b1111_1110
-                                            ));
-                                        break 'wait_buzz_cycle;
-                                    }
-                                } else if (tc1.tcnt1.read().bits().wrapping_sub(cycle_start_time) as u8) >= beep_cycle_midpoint {
-                                    buzz_cycle_high = true;
-                                    porta.porta.modify(|r, w| w.bits(
-                                        r.bits() | 0b0000_0001
-                                    ));
+            if dp.PORTC.intflags.read().pc0().bit_is_set() {
+                // Player A button press detected
+                dp.PORTC.intflags.modify(|r, w| { w.bits(r.bits() & 0b0000_0001)});
+                if chess_clock.mode != ClockMode::TurnB {
+                    let now = dp.RTC.cnt.read().bits();
+                    if now < new_player_a_pressed || now - new_player_a_pressed > 25 {
+                        dp.PORTC.outset.write(|w| {w.bits(0b0000_1000)});
+                        dp.PORTC.outclr.write(|w| {w.bits(0b0000_0010)});
+                        if chess_clock.mode == ClockMode::TurnA {
+                            let inc = chess_clock.increment[Player::A.own_idx()];
+                            chess_clock.timers[Player::A.own_idx()].increment(inc);
+                            chars_a = Some(chess_clock.get_digits(Player::A));
+                            // Buzzzzzz
+                            for _ in 1..100 {
+                                for _ in 1..155 {
+                                    dp.PORTA.outtgl.write(|w| { w.bits(0b0000_0000) });
                                 }
+                                dp.PORTC.outtgl.write(|w| { w.bits(0b0010_0000) });
                             }
-                            if beep_duration_remaining < beep_cycle_duration_16 {
-                                break 'wait_buzz_instance;
-                            }
-                            beep_duration_remaining -= beep_cycle_duration_16;
                         }
+                        chess_clock.mode = ClockMode::TurnB;
+                        new_player_a_pressed = now;
+                    }
+                }
+            }
+            if dp.PORTC.intflags.read().pc2().bit_is_set() {
+                // Player B button press detected
+                dp.PORTC.intflags.modify(|r, w| { w.bits(r.bits() & 0b0000_0100)});
+                if chess_clock.mode != ClockMode::TurnA {
+                    let now = dp.RTC.cnt.read().bits();
+                    if now < new_player_b_pressed || now - new_player_b_pressed > 25 {
+                        dp.PORTC.outclr.write(|w| {w.bits(0b0000_1000)});
+                        dp.PORTC.outset.write(|w| {w.bits(0b0000_0010)});
+                        if chess_clock.mode == ClockMode::TurnB {
+                            let inc = chess_clock.increment[Player::B.own_idx()];
+                            chess_clock.timers[Player::B.own_idx()].increment(inc);
+                            chars_b = Some(chess_clock.get_digits(Player::B));
+                            // Buzzzzzz
+                            for _ in 1..100 {
+                                for _ in 1..155 {
+                                    dp.PORTA.outtgl.write(|w| { w.bits(0b0000_0000) });
+                                }
+                                dp.PORTC.outtgl.write(|w| { w.bits(0b0010_0000) });
+                            }
+                        }
+                        chess_clock.mode = ClockMode::TurnA;
+                        new_player_b_pressed = now;
+                    }
+                }
+            }
+            if dp.PORTC.intflags.read().pc4().bit_is_set() {
+                // Control button press detected
+                dp.PORTC.intflags.modify(|r, w| { w.bits(r.bits() & 0b0001_0000)});
+                let now = dp.RTC.cnt.read().bits();
+                if now < new_control_pressed || now - new_control_pressed > 25 {
+                    dp.PORTC.outset.write(|w| {w.bits(0b0000_1010)});
+                    if chess_clock.mode == ClockMode::Pause {
+                        chess_clock.increment = [0, 0];
+                        chess_clock.timers = [Timer::new(300), Timer::new(300)];
+                        chars_a = Some(chess_clock.get_digits(Player::A));
+                        chars_b = Some(chess_clock.get_digits(Player::B));
+                    } else {
+                        chess_clock.mode = ClockMode::Pause;
+                    }
+                    new_control_pressed = now;
+                }
+            }
+        }
+
+        if let Some(chars) = chars_a {
+            render(cs, chars, Player::A, true);
+        }
+        if let Some(chars) = chars_b {
+            render(cs, chars, Player::B, true);
+        }
+    });
+
+    *PLAYER_A_PRESSED = new_player_a_pressed;
+    *PLAYER_B_PRESSED = new_player_b_pressed;
+    *CONTROL_PRESSED = new_control_pressed;
+}
+
+unsafe fn render(cs: CriticalSection<'_>, value: CharQuartet, player: Player, enable_col: bool) {
+    if let Some(ref mut dp) = DP.borrow(cs).borrow_mut().deref_mut() {
+
+        // CHARACTERS
+        dp.PORTA.outclr.write(|w| unsafe { w.bits(0b0000_0010) });
+        match player {
+            Player::A => {
+                dp.PORTA.outset.write(|w| unsafe { w.bits(0b0000_1000) });
+                dp.PORTA.outclr.write(|w| unsafe { w.bits(0b0000_0100) });
+            },
+            Player::B => {
+                dp.PORTA.outset.write(|w| unsafe { w.bits(0b0000_0100) });
+                dp.PORTA.outclr.write(|w| unsafe { w.bits(0b0000_1000) });
+            },
+        }
+        for char_position in CHAR_POSITIONS {
+            let char = value.get(char_position);
+            let ics_start = dp.TCA0.cnt().read().bits();
+
+            match char_position {
+                CharPosition::Second => {
+                    dp.PORTB.outclr.write(|w| unsafe {w.bits(0b1100_0000)});
+                },
+                CharPosition::Decasecond => {
+                    dp.PORTB.outclr.write(|w| unsafe {w.bits(0b1000_0000)});
+                    dp.PORTB.outset.write(|w| unsafe {w.bits(0b0100_0000)});
+                },
+                CharPosition::Minute => {
+                    dp.PORTB.outclr.write(|w| unsafe {w.bits(0b0100_0000)});
+                    dp.PORTB.outset.write(|w| unsafe {w.bits(0b1000_0000)});
+                },
+                CharPosition::Decaminute => {
+                    dp.PORTB.outset.write(|w| unsafe {w.bits(0b1100_0000)});
+                },
+            }
+
+            if char & 0b0000_0001 == 1 {
+                dp.PORTA.outset.write(|w| unsafe {w.bits(0b0001_0000)});
+            } else {
+                dp.PORTA.outclr.write(|w| unsafe {w.bits(0b0001_0000)});
+            }
+            if (char >> 1) & 0b0000_0001 == 1 {
+                dp.PORTA.outset.write(|w| unsafe {w.bits(0b0010_0000)});
+            } else {
+                dp.PORTA.outclr.write(|w| unsafe {w.bits(0b0010_0000)});
+            }
+            if (char >> 2) & 0b0000_0001 == 1 {
+                dp.PORTA.outset.write(|w| unsafe {w.bits(0b0100_0000)});
+            } else {
+                dp.PORTA.outclr.write(|w| unsafe {w.bits(0b0100_0000)});
+            }
+            if (char >> 3) & 0b0000_0001 == 1 {
+                dp.PORTA.outset.write(|w| unsafe {w.bits(0b1000_0000)});
+            } else {
+                dp.PORTA.outclr.write(|w| unsafe {w.bits(0b1000_0000)});
+            }
+
+            // Prepare char write
+            dp.PORTA.outclr.write(|w| unsafe {
+                w.bits(0b0000_0010)
+            });
+            let tcsa_start = dp.TCA0.cnt().read().bits();
+            'wait_ics: loop {
+                if dp.TCA0.cnt().read().bits().wrapping_sub(tcsa_start) >= 1 {
+                    break 'wait_ics;
+                }
+            }
+
+            // Allocate >= 2uS between each digit place (don't wait after the final digit)
+            if char_position == CharPosition::Second {
+                // Finish LCD write cycle
+                dp.PORTA.outset.write(|w| unsafe {
+                    w.bits(0b0000_1110)
+                });
+            } else {
+                // Latch the digit
+                dp.PORTA.outset.write(|w| unsafe {
+                    w.bits(0b0000_0010)
+                });
+                'wait_ics: loop {
+                    if dp.TCA0.cnt().read().bits().wrapping_sub(ics_start) >= 5 {
+                        break 'wait_ics;
                     }
                 }
             }
         }
 
-        if profile_cycle_pending {
-            if *CUR_CLOCK_PROFILE == 3 {
-                *CUR_CLOCK_PROFILE = 0;
-            } else {
-                *CUR_CLOCK_PROFILE += 1;
-            }
-            unsafe {
-                CHESS_CLOCK.borrow(cs).replace(ChessClock::new(Some(ChessClockConfig::new(Some((*CUR_CLOCK_PROFILE as u16) * 128)))));
-            }
+        // COLON
+        let col_bit_pos = match player {
+            Player::A => 0b0001_0000,
+            Player::B => 0b0010_0000,
+        };
+        if enable_col {
+            dp.PORTB.outset.write(|w| unsafe { w.bits(col_bit_pos) });
+        } else {
+            dp.PORTB.outclr.write(|w| unsafe { w.bits(col_bit_pos) });
         }
-    });
-}
-
-#[interrupt(attiny84a)]
-fn TIM1_OVF() {
-    interrupt::free(|cs| {
-        unsafe {
-            let ref mut chess_clock = CHESS_CLOCK.borrow(cs).borrow_mut();
-            let chess_clock_ref = chess_clock.deref_mut();
-            chess_clock_ref.tick();
-        }
-    });
+    }
 }

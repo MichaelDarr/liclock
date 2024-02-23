@@ -69,7 +69,7 @@ module cutout_lcd(x=0, y=0, z=0) {
     translate([x, y+1.6, z-1.6])
         rotate([45, 0, 0])
             rotate([0, 0, 90])
-                %import("LCD-S401C71TR.stl");
+                %import("../pcb/Clock-Parts.3dshapes/LCD-S401C71TR.stl");
 
     difference() {
         children();
@@ -87,7 +87,7 @@ module cutout_power_switch(x=0, y=0, z=0) {
         rotate([180,90,0])
             rotate([0,0,180])
                 scale([25.4,25.4,25.4])
-                    %import("CWSA11AAN1H.stl");
+                    %import("../pcb/Clock-Parts.3dshapes/CWSA11AAN1H.stl");
 
     difference() {
         children();

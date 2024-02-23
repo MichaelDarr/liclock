@@ -1,5 +1,5 @@
 [build]
-target = "avr-attiny84a.json"
+target = "avr-attiny1627.json"
 
 [target.'cfg(target_arch = "avr")']
 runner = "make flash"

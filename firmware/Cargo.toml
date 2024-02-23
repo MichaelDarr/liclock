@@ -1,6 +1,6 @@
 [package]
 name = "liclock"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Michael Darr <michael.e.darr@gmail.com>"]
 edition = "2021"
 publish = false
@@ -15,14 +15,7 @@ panic-halt = "0.2.0"
 
 [dependencies.avr-device]
 path = "../../avr-device"
-features = ["attiny84a", "rt"]
-
-[dependencies.attiny-hal]
-path = "../../avr-hal/mcu/attiny-hal"
-features = ["attiny84a"]
-
-[dependencies.avr-hal-generic]
-path = "../../avr-hal/avr-hal-generic"
+features = ["attiny1627", "rt"]
 
 [profile.dev]
 codegen-units = 1
