@@ -6,7 +6,7 @@ SwitchBezel = 9.4;
 MXCutout=14;
 
 // side length for mcs 18 front cutout
-MCS18FrontCutout=18;
+MCS18FrontCutout=18.4;
 
 module cutout_mx(x=0, y=0, z=0, lipHeight=1.5, lipDepth=2) {
     // Cherry MX switch model
@@ -28,7 +28,7 @@ module cutout_mx(x=0, y=0, z=0, lipHeight=1.5, lipDepth=2) {
                         square([MXCutout+lipDepth, MXCutout+lipDepth], center=true);
             // Above-lip cutout
             linear_extrude(height=4.4-lipHeight, center=false)
-                square([MXCutout+lipDepth, MXCutout+lipDepth], center=true);
+                square([MXCutout+lipDepth+1, MXCutout+lipDepth+1], center=true);
         }
     }
 }
@@ -117,11 +117,11 @@ module cutout_mounting_hole(x=0, y=0, z=0) {
             rotate([45, 0, 0])
                 rotate([0, 180, 0])
                     linear_extrude(height=12, center=false)
-                        circle(d=3.66, $fn=36);
+                        circle(d=4, $fn=64);
             rotate([45, 0, 0])
                 rotate([0, 180, 0])
                     linear_extrude(height=2.2, center=false)
-                        circle(d=6.8, $fn=36);
+                        circle(d=7.4, $fn=86);
         }
     }
 }
@@ -129,7 +129,7 @@ module cutout_mounting_hole(x=0, y=0, z=0) {
 centerToTip = Length/2; // 87
 centerToSwitch = centerToTip-SwitchBezel-(MXCutout/2); // 87 - 7.4 - (14/2)
 
-translate([0, 0, 49]) {
+translate([0, 0, 52]) {
     // Top Face
     translate([0, -7.8, -5])
         cutout_mx(x=centerToSwitch, z=-2.8) cutout_mx(x=centerToSwitch*-1, z=-2.8) cutout_mcs_18_front()
@@ -148,8 +148,8 @@ translate([0, 0, 49]) {
                         linear_extrude(height=Length, center=true)
                             polygon(
                                 points=[
-                                    [15.4,5],[45,5],[83,43],[83,49],[15.4,49],
-                                    [22,10],[40,10],[73,43],[73,49],[22,49]
+                                    [15.4,5],[45,5],[83,43],[83,52],[15.4,52],
+                                    [22,10],[40,10],[73,43],[73,52],[22,52]
                                 ],
                                 paths=[[0,1,2,3,4], [5,6,7,8,9]]
                             );
