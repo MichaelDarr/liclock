@@ -55,9 +55,7 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [
-        "silk_edge_clearance|146618387|91984000|a7027d92-3595-4d7f-adf4-abfcfb87ab44|6873309b-79a9-446a-8d76-1ba9ed1478e1"
-      ],
+      "drc_exclusions": [],
       "meta": {
         "version": 2
       },
@@ -469,7 +467,7 @@
       "idf": "",
       "netlist": "",
       "specctra_dsn": "",
-      "step": "",
+      "step": "../../../liclock_pcb.step",
       "vrml": ""
     },
     "page_layout_descr_file": "${KIPRJMOD}/liclock.kicad_wks"
