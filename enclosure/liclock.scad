@@ -6,7 +6,7 @@ SwitchBezel = 9.4;
 MXCutout=14;
 
 // side length for mcs 18 front cutout
-MCS18FrontCutout=18.6;
+MCS18FrontCutout=18;
 
 module cutout_mx(x=0, y=0, z=0, lipHeight=1.5, lipDepth=2) {
     // Cherry MX switch model
@@ -57,9 +57,9 @@ module cutout_mcs_18_front(x=0, y=0, z=0, lipHeight=4.4) {
                             square([MCS18FrontCutout-6, MCS18FrontCutout-6], center=true);
                     }
                     // directional key cutout
-                    translate([-7, 0, 0])
+                    translate([-6.7, 0, 0])
                         linear_extrude(height=9-lipHeight, center=false)
-                            square([2, 3], center=true);
+                            square([1.85, 2.55], center=true);
                 }
             }
     }
@@ -139,7 +139,7 @@ translate([0, 0, 49]) {
 
     // Body
     cutout_lcd(x=42, y=-36.7, z=-29.3) cutout_lcd(x=-42, y=-36.7, z=-29.3)
-    cutout_power_switch(x=-73, y=5.2, z=-39)
+    cutout_power_switch(x=-74, y=5.2, z=-38)
     cutout_mounting_hole(y=-41.9, z=-24.2) cutout_mounting_hole(x=84, y=-41.9, z=-24.2) cutout_mounting_hole(x=-84, y=-41.9, z=-24.2)
         difference() {
             translate([0, 22.5, 0])
