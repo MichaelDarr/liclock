@@ -138,12 +138,12 @@ module cutout_mounting_hole(x=0, y=0, z=0) {
 fsr1_panel_thickness = 1.5;
 // 3.6-3.7
 fsr1_hole_diameter = 3.7;
-// guess
-fsr1_insert_diameter = 5.5;
-// rivet = 5.1
-fsr1_insert_depth = 6;
+// measured as 4.7 min
+fsr1_insert_diameter = 5.2;
+// measured as 5.3 min
+fsr1_insert_depth = 5.8;
 
-// Potential alternative:
+// Potential alternative:fj
 // https://www.heyco.com/Nylon_PVC_Hardware/pdf/Push-In-Bumpers-2.pdf
 // Mouting Hole Diameter: 6.4mm/0.25"
 // Max Panel Thickness: 3.2mm/0.125"
