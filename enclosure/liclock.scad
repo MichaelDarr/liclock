@@ -3,10 +3,9 @@ Length = 178;
 // clock edge to switch cutout
 SwitchBezel = 9.4;
 // clock edge to foot cutout
-FootBezel = 4;
+FootBezel = 5;
 // side length for cherry mx cutouts
 MXCutout=14;
-
 // side length for mcs 18 front cutout
 MCS18FrontCutout=17;
 
